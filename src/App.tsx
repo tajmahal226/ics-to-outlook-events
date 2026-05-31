@@ -58,19 +58,17 @@ export default function App() {
       } else {
         // AI Extraction Flow
         toast.info('Analyzing schedule with AI...', {
-          description: 'This may take a moment for larger documents.',
+          description: 'Your document is sent directly for extraction without creating a public storage URL.',
           icon: <Sparkles className="w-5 h-5 text-primary" />,
         });
 
-        // 1. Upload to storage
-        const { publicUrl } = await blink.storage.upload(file, `uploads/${Date.now()}-${file.name}`);
-
-        // 2. Extract text
-        const extractedText = await blink.data.extractFromUrl(publicUrl);
+        // 1. Extract text directly from the uploaded file blob. This avoids
+        // creating public storage objects or exposing original filenames in URLs.
+        const extractedText = await blink.data.extractFromBlob(file);
         const text = Array.isArray(extractedText) ? extractedText.join('\n') : extractedText;
         setRawText(text);
 
-        // 3. Structure with AI
+        // 2. Structure with AI
         const { object } = await blink.ai.generateObject({
           prompt: `You are a precision calendar extraction expert. Extract all individual calendar events (sessions, meetings, presentations) from the schedule text below.
 
