@@ -4,6 +4,7 @@ import { format } from 'date-fns';
 import { Calendar as CalendarIcon, MapPin, Clock, Info, CheckCircle, Download, FileText, LayoutGrid, ChevronRight, Eye, Tag, AlignLeft, Globe, Users, Plus, X, Pencil, Sparkles, ExternalLink, AlertCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { CalendarEvent } from '@/lib/ics';
+import { hasBlockingValidationWarnings, isValidEventDate } from '@/lib/events';
 import { cn } from '@/lib/utils';
 
 interface EventListProps {
@@ -21,7 +22,8 @@ export function EventList({ events, rawText, onExport, onDownloadIndividual, onU
   const [view, setView] = useState<'grid' | 'text'>('grid');
   const [expandedEventId, setExpandedEventId] = useState<string | null>(null);
   const [newAttendee, setNewAttendee] = useState<string>('');
-  const ambiguousYearEventCount = events.filter((event) => event.validationWarnings?.length).length;
+  const eventsNeedingReviewCount = events.filter((event) => event.validationWarnings?.length).length;
+  const invalidEventCount = events.filter(hasBlockingValidationWarnings).length;
 
   const addAttendee = (eventId: string, currentAttendees: string[] = []) => {
     if (!newAttendee || !newAttendee.includes('@')) return;
@@ -35,7 +37,12 @@ export function EventList({ events, rawText, onExport, onDownloadIndividual, onU
     onUpdateEvent(eventId, { attendees: updated });
   };
 
+  const formatEventDate = (date: Date, formatString: string) => (isValidEventDate(date) ? format(date, formatString) : 'Invalid date');
+  const formatDateInputValue = (date: Date) => (isValidEventDate(date) ? format(date, "yyyy-MM-dd'T'HH:mm") : '');
+
   const getGoogleCalendarUrl = (event: CalendarEvent) => {
+    if (hasBlockingValidationWarnings(event)) return '#';
+
     const formatUrlDate = (date: Date) => date.toISOString().replace(/-|:|\.\d\d\d/g, '');
     const start = formatUrlDate(event.startDate);
     const end = formatUrlDate(event.endDate);
@@ -43,6 +50,8 @@ export function EventList({ events, rawText, onExport, onDownloadIndividual, onU
   };
 
   const getOutlookWebUrl = (event: CalendarEvent) => {
+    if (hasBlockingValidationWarnings(event)) return '#';
+
     return `https://outlook.office.com/calendar/0/deeplink/compose?subject=${encodeURIComponent(event.summary)}&startdt=${event.startDate.toISOString()}&enddt=${event.endDate.toISOString()}&body=${encodeURIComponent(event.description)}&location=${encodeURIComponent(event.location)}`;
   };
 
@@ -59,10 +68,11 @@ export function EventList({ events, rawText, onExport, onDownloadIndividual, onU
             <CheckCircle className="w-3.5 h-3.5 md:w-4 md:h-4 text-primary" />
             {events.length} {events.length === 1 ? 'event' : 'events'} successfully parsed by AI.
           </p>
-          {ambiguousYearEventCount > 0 && (
+          {eventsNeedingReviewCount > 0 && (
             <p className="flex items-center gap-2 text-xs font-semibold text-amber-700 md:text-sm">
               <AlertCircle className="h-3.5 w-3.5 md:h-4 md:w-4" />
-              {ambiguousYearEventCount} {ambiguousYearEventCount === 1 ? 'event has' : 'events have'} ambiguous inferred year warnings.
+              {eventsNeedingReviewCount} {eventsNeedingReviewCount === 1 ? 'event needs' : 'events need'} review
+              {invalidEventCount > 0 ? ` (${invalidEventCount} invalid until fixed)` : ''}.
             </p>
           )}
         </div>
@@ -97,7 +107,7 @@ export function EventList({ events, rawText, onExport, onDownloadIndividual, onU
 
           <Button
             onClick={onExport}
-            disabled={isLoading || events.length === 0}
+            disabled={isLoading || events.length === 0 || invalidEventCount > 0}
             className="bg-primary hover:bg-primary/90 text-white px-6 h-11 rounded-xl font-bold flex items-center justify-center gap-2 shadow-lg shadow-primary/20 transition-all duration-300 w-full sm:w-auto"
           >
             <Download className="w-4 h-4" />
@@ -144,6 +154,7 @@ export function EventList({ events, rawText, onExport, onDownloadIndividual, onU
                     variant="secondary"
                     size="sm"
                     onClick={() => onDownloadIndividual(event)}
+                    disabled={hasBlockingValidationWarnings(event)}
                     className="h-8 w-8 p-0 rounded-lg shadow-sm hover:bg-primary/10 hover:text-primary shrink-0"
                     title="Download individual ICS"
                   >
@@ -155,7 +166,7 @@ export function EventList({ events, rawText, onExport, onDownloadIndividual, onU
                   <div className="mb-3 flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 p-3 pr-20 text-xs text-amber-900 md:pr-24">
                     <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
                     <div>
-                      <p className="font-bold">Review inferred year</p>
+                      <p className="font-bold">Review event details</p>
                       <p>{event.validationWarnings[0]}</p>
                     </div>
                   </div>
@@ -172,10 +183,10 @@ export function EventList({ events, rawText, onExport, onDownloadIndividual, onU
                     <div className="flex items-center flex-wrap gap-x-2 gap-y-0.5 text-[10px] md:text-xs text-muted-foreground mt-1">
                       <div className="flex items-center gap-1">
                         <Clock className="w-3 h-3" />
-                        <span>{format(event.startDate, 'MMM d, yyyy')}</span>
+                        <span>{formatEventDate(event.startDate, 'MMM d, yyyy')}</span>
                       </div>
                       <span className="hidden xs:inline opacity-30">•</span>
-                      <span>{event.allDay ? 'All Day' : format(event.startDate, 'h:mm a')}</span>
+                      <span>{event.allDay ? 'All Day' : formatEventDate(event.startDate, 'h:mm a')}</span>
                     </div>
                   </div>
                 </div>
@@ -191,7 +202,7 @@ export function EventList({ events, rawText, onExport, onDownloadIndividual, onU
                       <div className="grid grid-cols-1 gap-4">
                         {event.validationWarnings?.length ? (
                           <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">
-                            <p className="mb-1 font-bold">Year validation warnings</p>
+                            <p className="mb-1 font-bold">Validation warnings</p>
                             <ul className="list-disc space-y-1 pl-4">
                               {event.validationWarnings.map((warning, warningIndex) => (
                                 <li key={warningIndex}>{warning}</li>
@@ -219,7 +230,7 @@ export function EventList({ events, rawText, onExport, onDownloadIndividual, onU
                             </label>
                             <input
                               type="datetime-local"
-                              value={format(event.startDate, "yyyy-MM-dd'T'HH:mm")}
+                              value={formatDateInputValue(event.startDate)}
                               onChange={(e) => onUpdateEvent(event.id, { startDate: new Date(e.target.value) })}
                               className="w-full bg-muted/50 p-2.5 rounded-lg text-xs font-mono border border-border/20 focus:outline-none focus:ring-1 focus:ring-primary/30 transition-all h-10"
                             />
@@ -230,7 +241,7 @@ export function EventList({ events, rawText, onExport, onDownloadIndividual, onU
                             </label>
                             <input
                               type="datetime-local"
-                              value={format(event.endDate, "yyyy-MM-dd'T'HH:mm")}
+                              value={formatDateInputValue(event.endDate)}
                               onChange={(e) => onUpdateEvent(event.id, { endDate: new Date(e.target.value) })}
                               className="w-full bg-muted/50 p-2.5 rounded-lg text-xs font-mono border border-border/20 focus:outline-none focus:ring-1 focus:ring-primary/30 transition-all h-10"
                             />
@@ -327,19 +338,27 @@ export function EventList({ events, rawText, onExport, onDownloadIndividual, onU
 
                         <div className="grid grid-cols-1 xs:grid-cols-2 gap-3 pt-2">
                           <a
+                            aria-disabled={hasBlockingValidationWarnings(event)}
                             href={getGoogleCalendarUrl(event)}
                             target="_blank"
                             rel="noopener noreferrer"
-                            className="flex items-center justify-center gap-2 bg-white hover:bg-primary/5 text-primary border border-primary/20 h-11 rounded-xl text-xs font-bold transition-all shadow-sm active:scale-95"
+                            className={cn(
+                              "flex items-center justify-center gap-2 bg-white hover:bg-primary/5 text-primary border border-primary/20 h-11 rounded-xl text-xs font-bold transition-all shadow-sm active:scale-95",
+                              hasBlockingValidationWarnings(event) && "pointer-events-none opacity-50"
+                            )}
                           >
                             <ExternalLink className="w-3.5 h-3.5" />
                             Add to Google
                           </a>
                           <a
+                            aria-disabled={hasBlockingValidationWarnings(event)}
                             href={getOutlookWebUrl(event)}
                             target="_blank"
                             rel="noopener noreferrer"
-                            className="flex items-center justify-center gap-2 bg-white hover:bg-primary/5 text-primary border border-primary/20 h-11 rounded-xl text-xs font-bold transition-all shadow-sm active:scale-95"
+                            className={cn(
+                              "flex items-center justify-center gap-2 bg-white hover:bg-primary/5 text-primary border border-primary/20 h-11 rounded-xl text-xs font-bold transition-all shadow-sm active:scale-95",
+                              hasBlockingValidationWarnings(event) && "pointer-events-none opacity-50"
+                            )}
                           >
                             <ExternalLink className="w-3.5 h-3.5" />
                             Add to Outlook
