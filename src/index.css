@@ -7,6 +7,7 @@
 @layer base {
   :root {
     /* ⚠️ AGENT MUST REPLACE: These are placeholder colors. You MUST define a custom palette before writing components. */
+
     /* The template uses distinctive placeholder colors to force customization - do NOT use these in production! */
     
     /* 
@@ -77,14 +78,14 @@
     --font-mono: 'IBM Plex Mono', monospace;
 
     /* Shadows */
-    --shadow-2xs: 0px 4px 8px -1px hsl(0 0% 0% / 0.05);
-    --shadow-xs: 0px 4px 8px -1px hsl(0 0% 0% / 0.05);
-    --shadow-sm: 0px 4px 8px -1px hsl(0 0% 0% / 0.10), 0px 1px 2px -2px hsl(0 0% 0% / 0.10);
-    --shadow: 0px 4px 8px -1px hsl(0 0% 0% / 0.10), 0px 1px 2px -2px hsl(0 0% 0% / 0.10);
-    --shadow-md: 0px 4px 8px -1px hsl(0 0% 0% / 0.10), 0px 2px 4px -2px hsl(0 0% 0% / 0.10);
-    --shadow-lg: 0px 4px 8px -1px hsl(0 0% 0% / 0.10), 0px 4px 6px -2px hsl(0 0% 0% / 0.10);
-    --shadow-xl: 0px 4px 8px -1px hsl(0 0% 0% / 0.10), 0px 8px 10px -2px hsl(0 0% 0% / 0.10);
-    --shadow-2xl: 0px 4px 8px -1px hsl(0 0% 0% / 0.25);
+    --shadow-2xs: 0px 4px 8px -1px hsl(0deg 0% 0% / 5%);
+    --shadow-xs: 0px 4px 8px -1px hsl(0deg 0% 0% / 5%);
+    --shadow-sm: 0px 4px 8px -1px hsl(0deg 0% 0% / 10%), 0px 1px 2px -2px hsl(0deg 0% 0% / 10%);
+    --shadow: 0px 4px 8px -1px hsl(0deg 0% 0% / 10%), 0px 1px 2px -2px hsl(0deg 0% 0% / 10%);
+    --shadow-md: 0px 4px 8px -1px hsl(0deg 0% 0% / 10%), 0px 2px 4px -2px hsl(0deg 0% 0% / 10%);
+    --shadow-lg: 0px 4px 8px -1px hsl(0deg 0% 0% / 10%), 0px 4px 6px -2px hsl(0deg 0% 0% / 10%);
+    --shadow-xl: 0px 4px 8px -1px hsl(0deg 0% 0% / 10%), 0px 8px 10px -2px hsl(0deg 0% 0% / 10%);
+    --shadow-2xl: 0px 4px 8px -1px hsl(0deg 0% 0% / 25%);
 
     /* Misc */
     --tracking-normal: 0em;
@@ -137,16 +138,17 @@
 
   body {
     @apply bg-background text-foreground;
-    font-family: var(--font-sans), 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif;
+
+    font-family: var(--font-sans), Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
     letter-spacing: var(--tracking-normal);
   }
 }
 
 .animate-fade-in {
-  animation: fadeIn 0.3s ease-in-out;
+  animation: fade-in 0.3s ease-in-out;
 }
 
-@keyframes fadeIn {
+@keyframes fade-in {
   from {
     opacity: 0;
     transform: translateY(10px);
