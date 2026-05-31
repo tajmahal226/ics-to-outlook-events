@@ -16,6 +16,105 @@ import {
 import { parseICS, generateCleanICS, CalendarEvent } from '@/lib/ics';
 import { blink } from '@/lib/blink';
 
+
+const EXTRACTION_CHUNK_SIZE = 12000;
+const MAX_EXTRACTION_CHUNKS = 25;
+const MIN_NATURAL_BREAK_OFFSET = Math.floor(EXTRACTION_CHUNK_SIZE * 0.65);
+
+type TextChunkPlan = {
+  chunks: string[];
+  omittedCharacters: number;
+};
+
+const buildEventExtractionPrompt = (chunk: string, chunkNumber: number, totalChunks: number) => `You are a precision calendar extraction expert. Extract all individual calendar events (sessions, meetings, presentations) from this schedule text chunk.
+
+This is chunk ${chunkNumber} of ${totalChunks}. Treat it as one section of a longer document and extract only events that are visible in this chunk.
+
+CRITICAL INSTRUCTIONS:
+- The event TITLE (summary) MUST be the specific session topic or the company name mentioned (e.g., "Meeting with Jack Henry & Associates, Inc. (JKHY US)").
+- DO NOT use the conference title, document header, or generic page headers as the event summary.
+- If the year is missing, assume 2026.
+- Ensure startDate and endDate are in ISO 8601 format.
+
+Text to analyze:
+${chunk}`;
+
+const findNaturalBreak = (text: string, start: number, hardEnd: number) => {
+  const earliestBreak = start + MIN_NATURAL_BREAK_OFFSET;
+  const searchWindow = text.slice(earliestBreak, hardEnd);
+  const breakPatterns = ['\n\n', '\n', '. ', '; '];
+
+  for (const pattern of breakPatterns) {
+    const relativeIndex = searchWindow.lastIndexOf(pattern);
+    if (relativeIndex !== -1) {
+      return earliestBreak + relativeIndex + pattern.length;
+    }
+  }
+
+  return hardEnd;
+};
+
+export const splitTextIntoExtractionChunks = (text: string): TextChunkPlan => {
+  const chunks: string[] = [];
+  let start = 0;
+
+  while (start < text.length && chunks.length < MAX_EXTRACTION_CHUNKS) {
+    const hardEnd = Math.min(start + EXTRACTION_CHUNK_SIZE, text.length);
+    const end = hardEnd === text.length ? hardEnd : findNaturalBreak(text, start, hardEnd);
+    const chunk = text.slice(start, end).trim();
+
+    if (chunk) {
+      chunks.push(chunk);
+    }
+
+    start = end;
+  }
+
+  return {
+    chunks,
+    omittedCharacters: Math.max(text.length - start, 0),
+  };
+};
+
+const normalizeDedupePart = (value: string | Date | undefined) => {
+  if (value instanceof Date) {
+    return Number.isNaN(value.getTime()) ? '' : value.toISOString();
+  }
+
+  return (value || '').trim().toLowerCase().replace(/\s+/g, ' ');
+};
+
+const getEventDedupeKey = (event: CalendarEvent) => [
+  normalizeDedupePart(event.summary),
+  normalizeDedupePart(event.startDate),
+  normalizeDedupePart(event.endDate),
+  normalizeDedupePart(event.location),
+].join('|');
+
+const dedupeEvents = (eventsToDedupe: CalendarEvent[]) => {
+  const seen = new Set<string>();
+
+  return eventsToDedupe.filter((event) => {
+    const key = getEventDedupeKey(event);
+    if (seen.has(key)) {
+      return false;
+    }
+
+    seen.add(key);
+    return true;
+  });
+};
+
+const mapAiEventToCalendarEvent = (event: any): CalendarEvent => ({
+  id: Math.random().toString(36).substr(2, 9),
+  summary: event.summary,
+  description: event.description || '',
+  location: event.location || '',
+  startDate: new Date(event.startDate),
+  endDate: new Date(event.endDate),
+  allDay: !!event.allDay,
+});
+
 const EVENT_SCHEMA = {
   type: 'object',
   properties: {
@@ -43,13 +142,16 @@ export default function App() {
   const [fileName, setFileName] = useState<string>('');
   const [isLoading, setIsLoading] = useState(false);
   const [rawText, setRawText] = useState<string>('');
+  const [extractionStatus, setExtractionStatus] = useState<string>('');
   const [isPolishing, setIsPolishing] = useState<string | null>(null);
 
   const handleFileLoaded = useCallback(async (file: File) => {
     setIsLoading(true);
     setRawText('');
+    setExtractionStatus('');
     try {
       let extractedEvents: CalendarEvent[] = [];
+      let partialExtractionStatus = '';
 
       if (file.name.toLowerCase().endsWith('.ics')) {
         const content = await file.text();
@@ -68,30 +170,42 @@ export default function App() {
         const text = Array.isArray(extractedText) ? extractedText.join('\n') : extractedText;
         setRawText(text);
 
-        // 2. Structure with AI
-        const { object } = await blink.ai.generateObject({
-          prompt: `You are a precision calendar extraction expert. Extract all individual calendar events (sessions, meetings, presentations) from the schedule text below.
+        // 2. Structure with AI in bounded chunks so events later in long
+        // documents are not silently skipped after the old 15,000-character cut-off.
+        const { chunks, omittedCharacters } = splitTextIntoExtractionChunks(text);
 
-CRITICAL INSTRUCTIONS:
-- The event TITLE (summary) MUST be the specific session topic or the company name mentioned (e.g., "Meeting with Jack Henry & Associates, Inc. (JKHY US)").
-- DO NOT use the conference title, document header, or generic page headers as the event summary.
-- If the year is missing, assume 2026.
-- Ensure startDate and endDate are in ISO 8601 format.
+        if (chunks.length > 1) {
+          toast.info(`Analyzing ${chunks.length} document sections with AI...`, {
+            description: 'Long documents are split into bounded chunks and merged after extraction.',
+            icon: <Sparkles className="w-5 h-5 text-primary" />,
+          });
+        }
 
-Text to analyze:
-${text.substring(0, 15000)}`,
-          schema: EVENT_SCHEMA as any,
-        });
+        const chunkEvents: CalendarEvent[] = [];
 
-        extractedEvents = (object as any).events.map((e: any) => ({
-          id: Math.random().toString(36).substr(2, 9),
-          summary: e.summary,
-          description: e.description || '',
-          location: e.location || '',
-          startDate: new Date(e.startDate),
-          endDate: new Date(e.endDate),
-          allDay: !!e.allDay,
-        }));
+        for (const [index, chunk] of chunks.entries()) {
+          if (chunks.length > 1) {
+            toast.info(`Extracting section ${index + 1} of ${chunks.length}...`);
+          }
+
+          const { object } = await blink.ai.generateObject({
+            prompt: buildEventExtractionPrompt(chunk, index + 1, chunks.length),
+            schema: EVENT_SCHEMA as any,
+          });
+
+          chunkEvents.push(...((object as any).events || []).map(mapAiEventToCalendarEvent));
+        }
+
+        extractedEvents = dedupeEvents(chunkEvents);
+
+        if (omittedCharacters > 0) {
+          partialExtractionStatus = `${omittedCharacters.toLocaleString()} characters were omitted after processing ${chunks.length} sections. Review the extracted events for completeness.`;
+          setExtractionStatus(partialExtractionStatus);
+          toast.warning('Partial extraction completed', {
+            description: partialExtractionStatus,
+            icon: <AlertCircle className="w-5 h-5" />,
+          });
+        }
       }
 
       if (extractedEvents.length === 0) {
@@ -101,7 +215,9 @@ ${text.substring(0, 15000)}`,
 
       setEvents(extractedEvents);
       setFileName(file.name);
-      toast.success(`Successfully extracted ${extractedEvents.length} events`);
+      toast.success(`Successfully extracted ${extractedEvents.length} events`, {
+        description: partialExtractionStatus || undefined,
+      });
     } catch (error: any) {
       console.error('Extraction error:', error);
       toast.error('Failed to process file', {
@@ -150,7 +266,7 @@ ${text.substring(0, 15000)}`,
   const handleExport = useCallback(() => {
     if (events.length === 0) return;
     setIsLoading(true);
-    
+
     try {
       const cleanedICS = generateCleanICS(events);
       const blob = new Blob([cleanedICS], { type: 'text/calendar;charset=utf-8' });
@@ -160,7 +276,7 @@ ${text.substring(0, 15000)}`,
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
-      
+
       toast.success('ICS file generated!', {
         description: 'You can now import this file directly into Outlook.',
         icon: <Download className="w-5 h-5 text-primary" />,
@@ -176,12 +292,13 @@ ${text.substring(0, 15000)}`,
     setEvents([]);
     setFileName('');
     setRawText('');
+    setExtractionStatus('');
   }, []);
 
   return (
     <div className="min-h-screen bg-background text-foreground flex flex-col font-sans text-[15px] selection:bg-primary/10">
       <Toaster position="top-right" expand={false} richColors />
-      
+
       {/* Navigation */}
       <nav className="h-16 md:h-20 border-b border-border/50 backdrop-blur-xl bg-background/80 sticky top-0 z-50 px-4 md:px-6 flex items-center justify-between overflow-hidden">
         <div className="flex items-center gap-2 md:gap-3">
@@ -193,7 +310,7 @@ ${text.substring(0, 15000)}`,
             <span className="text-[10px] text-muted-foreground font-medium uppercase tracking-widest mt-0.5 md:mt-1 opacity-60 hidden sm:block">AI Extraction Tool</span>
           </div>
         </div>
-        
+
         <div className="flex items-center gap-2 md:gap-4">
           <Dialog>
             <DialogTrigger asChild>
@@ -242,9 +359,9 @@ ${text.substring(0, 15000)}`,
                 animate={{ opacity: 1, x: 0 }}
                 exit={{ opacity: 0, x: 20 }}
               >
-                <Button 
-                  variant="ghost" 
-                  size="sm" 
+                <Button
+                  variant="ghost"
+                  size="sm"
                   onClick={handleReset}
                   className="text-muted-foreground hover:text-destructive hover:bg-destructive/5 gap-1.5 md:gap-2 h-9 md:h-10 rounded-lg md:rounded-xl px-2 md:px-4 transition-all duration-300"
                 >
@@ -266,7 +383,7 @@ ${text.substring(0, 15000)}`,
           </div>
 
           <div className="max-w-4xl mx-auto text-center mb-8 md:mb-16">
-            <motion.h2 
+            <motion.h2
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
               className="text-3xl sm:text-4xl md:text-5xl lg:text-6xl font-black mb-4 md:mb-6 leading-[1.1] tracking-tight"
@@ -287,16 +404,27 @@ ${text.substring(0, 15000)}`,
             {events.length === 0 ? (
               <UploadZone onFileLoaded={handleFileLoaded} isLoading={isLoading} />
             ) : (
-              <EventList 
-                events={events} 
-                onExport={handleExport} 
-                onDownloadIndividual={handleDownloadIndividual}
-                onUpdateEvent={handleUpdateEvent}
-                onPolishDescription={handlePolishDescription}
-                rawText={rawText}
-                isLoading={isLoading} 
-                isPolishing={isPolishing}
-              />
+              <div className="space-y-4">
+                {extractionStatus && (
+                  <div className="flex items-start gap-3 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-left text-sm text-amber-900 shadow-sm">
+                    <AlertCircle className="mt-0.5 h-5 w-5 shrink-0" />
+                    <div>
+                      <p className="font-semibold">Partial extraction notice</p>
+                      <p>{extractionStatus}</p>
+                    </div>
+                  </div>
+                )}
+                <EventList
+                  events={events}
+                  onExport={handleExport}
+                  onDownloadIndividual={handleDownloadIndividual}
+                  onUpdateEvent={handleUpdateEvent}
+                  onPolishDescription={handlePolishDescription}
+                  rawText={rawText}
+                  isLoading={isLoading}
+                  isPolishing={isPolishing}
+                />
+              </div>
             )}
           </div>
         </section>

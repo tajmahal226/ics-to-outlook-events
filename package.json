@@ -11,7 +11,8 @@
     "lint:types": "tsc --noEmit",
     "check:css-vars": "node scripts/check-css-variables.js",
     "check:css-classes": "node scripts/check-css-classes.js",
-    "lint": "tsc --noEmit && stylelint \"src/**/*.css\" --fix --quiet && node scripts/check-css-variables.js && node scripts/check-css-classes.js"
+    "lint": "tsc --noEmit && stylelint \"src/**/*.css\" --fix --quiet && node scripts/check-css-variables.js && node scripts/check-css-classes.js",
+    "test:long-document-fixture": "node scripts/verify-long-document-fixture.mjs"
   },
   "devDependencies": {
     "@types/react": "^19.2.15",
