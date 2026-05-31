@@ -9,6 +9,7 @@ export interface CalendarEvent {
   endDate: Date;
   allDay: boolean;
   attendees?: string[];
+  validationWarnings?: string[];
 }
 
 export function parseICS(rawContent: string): CalendarEvent[] {
