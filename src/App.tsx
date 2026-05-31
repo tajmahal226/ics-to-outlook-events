@@ -66,7 +66,8 @@ export default function App() {
         const { publicUrl } = await blink.storage.upload(file, `uploads/${Date.now()}-${file.name}`);
 
         // 2. Extract text
-        const text = await blink.data.extractFromUrl(publicUrl);
+        const extractedText = await blink.data.extractFromUrl(publicUrl);
+        const text = Array.isArray(extractedText) ? extractedText.join('\n') : extractedText;
         setRawText(text);
 
         // 3. Structure with AI
