@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Calendar, Trash2, Download, CheckCircle2, AlertCircle, Sparkles, HelpCircle } from 'lucide-react';
 import { toast, Toaster } from 'sonner';
@@ -26,15 +26,119 @@ type TextChunkPlan = {
   omittedCharacters: number;
 };
 
-const buildEventExtractionPrompt = (chunk: string, chunkNumber: number, totalChunks: number) => `You are a precision calendar extraction expert. Extract all individual calendar events (sessions, meetings, presentations) from this schedule text chunk.
+type DefaultYearSource = 'user' | 'document' | 'filename' | 'current-year' | 'next-year';
+
+type DefaultYearPlan = {
+  year: number;
+  source: DefaultYearSource;
+  sourceLabel: string;
+  supportingYears: number[];
+  isAmbiguous: boolean;
+};
+
+const YEAR_PATTERN = /\b(?:19|20)\d{2}\b/g;
+const LATE_YEAR_FALLBACK_MONTH = 9;
+
+const extractYears = (value: string) => {
+  const years = new Set<number>();
+
+  for (const match of value.matchAll(YEAR_PATTERN)) {
+    const year = Number(match[0]);
+    if (year >= 1970 && year <= 2100) {
+      years.add(year);
+    }
+  }
+
+  return [...years].sort((a, b) => a - b);
+};
+
+const chooseClosestUsableYear = (years: number[], currentYear: number) => {
+  const upcomingYear = years.find((year) => year >= currentYear);
+  return upcomingYear ?? years[years.length - 1];
+};
+
+const getDateBasedFallbackYear = (now = new Date()) => {
+  const currentYear = now.getFullYear();
+  return now.getMonth() >= LATE_YEAR_FALLBACK_MONTH ? currentYear + 1 : currentYear;
+};
+
+const buildDefaultYearPlan = ({
+  sourceText = '',
+  fileName = '',
+  userSelectedYear,
+  now = new Date(),
+}: {
+  sourceText?: string;
+  fileName?: string;
+  userSelectedYear?: number | null;
+  now?: Date;
+}): DefaultYearPlan => {
+  const currentYear = now.getFullYear();
+
+  if (userSelectedYear) {
+    return {
+      year: userSelectedYear,
+      source: 'user',
+      sourceLabel: 'your selected default year',
+      supportingYears: [userSelectedYear],
+      isAmbiguous: false,
+    };
+  }
+
+  const documentYears = extractYears(sourceText);
+  if (documentYears.length > 0) {
+    return {
+      year: chooseClosestUsableYear(documentYears, currentYear),
+      source: 'document',
+      sourceLabel: documentYears.length === 1 ? 'the uploaded document text' : 'multiple years found in the document text',
+      supportingYears: documentYears,
+      isAmbiguous: documentYears.length > 1,
+    };
+  }
+
+  const filenameYears = extractYears(fileName);
+  if (filenameYears.length > 0) {
+    return {
+      year: chooseClosestUsableYear(filenameYears, currentYear),
+      source: 'filename',
+      sourceLabel: filenameYears.length === 1 ? 'the filename' : 'multiple years found in the filename',
+      supportingYears: filenameYears,
+      isAmbiguous: filenameYears.length > 1,
+    };
+  }
+
+  const fallbackYear = getDateBasedFallbackYear(now);
+
+  return {
+    year: fallbackYear,
+    source: fallbackYear === currentYear ? 'current-year' : 'next-year',
+    sourceLabel: fallbackYear === currentYear ? 'the current calendar year' : 'the next calendar year',
+    supportingYears: [fallbackYear],
+    isAmbiguous: true,
+  };
+};
+
+const describeDefaultYearPlan = (plan: DefaultYearPlan) => {
+  const yearList = plan.supportingYears.join(', ');
+  const ambiguityNote = plan.isAmbiguous ? ' Review events using this fallback because the source year is ambiguous.' : '';
+
+  return `Default year: ${plan.year} from ${plan.sourceLabel}${yearList ? ` (${yearList})` : ''}.${ambiguityNote}`;
+};
+
+const buildEventExtractionPrompt = (chunk: string, chunkNumber: number, totalChunks: number, defaultYearPlan: DefaultYearPlan) => `You are a precision calendar extraction expert. Extract all individual calendar events (sessions, meetings, presentations) from this schedule text chunk.
 
 This is chunk ${chunkNumber} of ${totalChunks}. Treat it as one section of a longer document and extract only events that are visible in this chunk.
 
 CRITICAL INSTRUCTIONS:
 - The event TITLE (summary) MUST be the specific session topic or the company name mentioned (e.g., "Meeting with Jack Henry & Associates, Inc. (JKHY US)").
 - DO NOT use the conference title, document header, or generic page headers as the event summary.
-- If the year is missing, assume 2026.
+- Prefer any explicit year in the event text, document context, or filename context before using a fallback year.
+- When an event date is missing a year and no more specific year is visible in the chunk, use ${defaultYearPlan.year} as the default year (${defaultYearPlan.sourceLabel}).
+- If the event year is inferred from a fallback, conflicting document years, or weak context, set ambiguousYear to true and explain why in yearInferenceReason.
 - Ensure startDate and endDate are in ISO 8601 format.
+
+Default year context for this upload:
+${describeDefaultYearPlan(defaultYearPlan)}
 
 Text to analyze:
 ${chunk}`;
@@ -105,7 +209,24 @@ const dedupeEvents = (eventsToDedupe: CalendarEvent[]) => {
   });
 };
 
-const mapAiEventToCalendarEvent = (event: any): CalendarEvent => ({
+const getYearValidationWarnings = (event: any, defaultYearPlan: DefaultYearPlan) => {
+  const warnings: string[] = [];
+  const startYear = new Date(event.startDate).getFullYear();
+  const endYear = new Date(event.endDate).getFullYear();
+  const eventUsesDefaultYear = startYear === defaultYearPlan.year || endYear === defaultYearPlan.year;
+
+  if (event.ambiguousYear) {
+    warnings.push(event.yearInferenceReason || 'The AI marked this event year as ambiguous.');
+  }
+
+  if (eventUsesDefaultYear && defaultYearPlan.isAmbiguous && !event.yearSourceText) {
+    warnings.push(`Year ${defaultYearPlan.year} was inferred from ${defaultYearPlan.sourceLabel}; review this event date before exporting.`);
+  }
+
+  return [...new Set(warnings)];
+};
+
+const mapAiEventToCalendarEvent = (event: any, defaultYearPlan: DefaultYearPlan): CalendarEvent => ({
   id: Math.random().toString(36).substr(2, 9),
   summary: event.summary,
   description: event.description || '',
@@ -113,6 +234,7 @@ const mapAiEventToCalendarEvent = (event: any): CalendarEvent => ({
   startDate: new Date(event.startDate),
   endDate: new Date(event.endDate),
   allDay: !!event.allDay,
+  validationWarnings: getYearValidationWarnings(event, defaultYearPlan),
 });
 
 const EVENT_SCHEMA = {
@@ -128,7 +250,10 @@ const EVENT_SCHEMA = {
           location: { type: 'string', description: 'Where the event takes place' },
           startDate: { type: 'string', description: 'ISO 8601 date string' },
           endDate: { type: 'string', description: 'ISO 8601 date string' },
-          allDay: { type: 'boolean' }
+          allDay: { type: 'boolean' },
+          ambiguousYear: { type: 'boolean', description: 'True when the event year was inferred from weak, conflicting, or fallback context' },
+          yearInferenceReason: { type: 'string', description: 'Short explanation of how the event year was chosen, especially if ambiguous' },
+          yearSourceText: { type: 'string', description: 'Exact nearby source text containing an explicit year, when available' }
         },
         required: ['summary', 'startDate', 'endDate']
       }
@@ -143,12 +268,19 @@ export default function App() {
   const [isLoading, setIsLoading] = useState(false);
   const [rawText, setRawText] = useState<string>('');
   const [extractionStatus, setExtractionStatus] = useState<string>('');
+  const [yearInferenceStatus, setYearInferenceStatus] = useState<string>('');
+  const [explicitDefaultYear, setExplicitDefaultYear] = useState<number | null>(null);
   const [isPolishing, setIsPolishing] = useState<string | null>(null);
+
+  const currentYear = new Date().getFullYear();
+  const fallbackYearPreview = useMemo(() => buildDefaultYearPlan({ userSelectedYear: explicitDefaultYear }), [explicitDefaultYear]);
+  const selectableYears = useMemo(() => Array.from({ length: 6 }, (_, index) => currentYear + index), [currentYear]);
 
   const handleFileLoaded = useCallback(async (file: File) => {
     setIsLoading(true);
     setRawText('');
     setExtractionStatus('');
+    setYearInferenceStatus('');
     try {
       let extractedEvents: CalendarEvent[] = [];
       let partialExtractionStatus = '';
@@ -157,6 +289,8 @@ export default function App() {
         const content = await file.text();
         extractedEvents = parseICS(content);
         setRawText(content);
+        const defaultYearPlan = buildDefaultYearPlan({ sourceText: content, fileName: file.name, userSelectedYear: explicitDefaultYear });
+        setYearInferenceStatus(`ICS import preserved event years from the calendar file. ${describeDefaultYearPlan(defaultYearPlan)}`);
       } else {
         // AI Extraction Flow
         toast.info('Analyzing schedule with AI...', {
@@ -169,6 +303,13 @@ export default function App() {
         const extractedText = await blink.data.extractFromBlob(file);
         const text = Array.isArray(extractedText) ? extractedText.join('\n') : extractedText;
         setRawText(text);
+
+        const defaultYearPlan = buildDefaultYearPlan({ sourceText: text, fileName: file.name, userSelectedYear: explicitDefaultYear });
+        const defaultYearDescription = describeDefaultYearPlan(defaultYearPlan);
+        setYearInferenceStatus(defaultYearDescription);
+        toast.info('Year inference ready', {
+          description: defaultYearDescription,
+        });
 
         // 2. Structure with AI in bounded chunks so events later in long
         // documents are not silently skipped after the old 15,000-character cut-off.
@@ -189,11 +330,11 @@ export default function App() {
           }
 
           const { object } = await blink.ai.generateObject({
-            prompt: buildEventExtractionPrompt(chunk, index + 1, chunks.length),
+            prompt: buildEventExtractionPrompt(chunk, index + 1, chunks.length, defaultYearPlan),
             schema: EVENT_SCHEMA as any,
           });
 
-          chunkEvents.push(...((object as any).events || []).map(mapAiEventToCalendarEvent));
+          chunkEvents.push(...((object as any).events || []).map((event: any) => mapAiEventToCalendarEvent(event, defaultYearPlan)));
         }
 
         extractedEvents = dedupeEvents(chunkEvents);
@@ -226,7 +367,7 @@ export default function App() {
     } finally {
       setIsLoading(false);
     }
-  }, []);
+  }, [explicitDefaultYear]);
 
   const handleDownloadIndividual = useCallback((event: CalendarEvent) => {
     try {
@@ -293,6 +434,7 @@ export default function App() {
     setFileName('');
     setRawText('');
     setExtractionStatus('');
+    setYearInferenceStatus('');
   }, []);
 
   return (
@@ -402,9 +544,43 @@ export default function App() {
 
           <div className="max-w-5xl mx-auto w-full">
             {events.length === 0 ? (
-              <UploadZone onFileLoaded={handleFileLoaded} isLoading={isLoading} />
+              <div className="space-y-4">
+                <div className="glass-card rounded-2xl border border-border/50 p-4 text-left shadow-sm">
+                  <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                    <div className="space-y-1">
+                      <p className="text-sm font-bold text-foreground">Year inference default</p>
+                      <p className="text-xs text-muted-foreground md:text-sm">
+                        {describeDefaultYearPlan(fallbackYearPreview)} Source text and filenames are checked first after upload.
+                      </p>
+                    </div>
+                    <label className="flex shrink-0 flex-col gap-1 text-xs font-bold uppercase tracking-wider text-muted-foreground">
+                      Default year
+                      <select
+                        value={explicitDefaultYear ?? ''}
+                        onChange={(event) => setExplicitDefaultYear(event.target.value ? Number(event.target.value) : null)}
+                        className="h-10 rounded-xl border border-border/60 bg-background px-3 text-sm font-semibold normal-case tracking-normal text-foreground shadow-sm focus:outline-none focus:ring-2 focus:ring-primary/20"
+                      >
+                        <option value="">Auto ({fallbackYearPreview.year})</option>
+                        {selectableYears.map((year) => (
+                          <option key={year} value={year}>{year}</option>
+                        ))}
+                      </select>
+                    </label>
+                  </div>
+                </div>
+                <UploadZone onFileLoaded={handleFileLoaded} isLoading={isLoading} />
+              </div>
             ) : (
               <div className="space-y-4">
+                {yearInferenceStatus && (
+                  <div className="flex items-start gap-3 rounded-2xl border border-primary/20 bg-primary/5 p-4 text-left text-sm text-foreground shadow-sm">
+                    <Calendar className="mt-0.5 h-5 w-5 shrink-0 text-primary" />
+                    <div>
+                      <p className="font-semibold">Year inference used for this extraction</p>
+                      <p className="text-muted-foreground">{yearInferenceStatus}</p>
+                    </div>
+                  </div>
+                )}
                 {extractionStatus && (
                   <div className="flex items-start gap-3 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-left text-sm text-amber-900 shadow-sm">
                     <AlertCircle className="mt-0.5 h-5 w-5 shrink-0" />
