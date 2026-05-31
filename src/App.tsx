@@ -14,6 +14,7 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { parseICS, generateCleanICS, CalendarEvent } from '@/lib/ics';
+import { getBlockingValidationWarnings, getEventValidationMessage, mergeEventValidationWarnings, validateCalendarEvent, validateEventFields } from '@/lib/events';
 import { blink } from '@/lib/blink';
 
 
@@ -323,6 +324,7 @@ export default function App() {
         }
 
         const chunkEvents: CalendarEvent[] = [];
+        const skippedEventWarnings: string[] = [];
 
         for (const [index, chunk] of chunks.entries()) {
           if (chunks.length > 1) {
@@ -334,10 +336,34 @@ export default function App() {
             schema: EVENT_SCHEMA as any,
           });
 
-          chunkEvents.push(...((object as any).events || []).map((event: any) => mapAiEventToCalendarEvent(event, defaultYearPlan)));
+          ((object as any).events || []).forEach((event: any, eventIndex: number) => {
+            const validationWarnings = validateEventFields({
+              summary: event?.summary,
+              startDate: event?.startDate,
+              endDate: event?.endDate,
+            });
+
+            if (validationWarnings.length > 0) {
+              const eventLabel = String(event?.summary || '').trim() || `section ${index + 1}, event ${eventIndex + 1}`;
+              skippedEventWarnings.push(`${eventLabel}: ${validationWarnings.map(getEventValidationMessage).join(' ')}`);
+              return;
+            }
+
+            const calendarEvent = mapAiEventToCalendarEvent(event, defaultYearPlan);
+            calendarEvent.validationWarnings = mergeEventValidationWarnings(calendarEvent.validationWarnings, validateCalendarEvent(calendarEvent));
+            chunkEvents.push(calendarEvent);
+          });
         }
 
         extractedEvents = dedupeEvents(chunkEvents);
+
+        if (skippedEventWarnings.length > 0) {
+          const skippedDescription = skippedEventWarnings.slice(0, 3).join(' • ');
+          toast.warning(`${skippedEventWarnings.length} invalid ${skippedEventWarnings.length === 1 ? 'event was' : 'events were'} skipped`, {
+            description: skippedEventWarnings.length > 3 ? `${skippedDescription} • Review the source for more invalid rows.` : skippedDescription,
+            icon: <AlertCircle className="w-5 h-5" />,
+          });
+        }
 
         if (omittedCharacters > 0) {
           partialExtractionStatus = `${omittedCharacters.toLocaleString()} characters were omitted after processing ${chunks.length} sections. Review the extracted events for completeness.`;
@@ -370,6 +396,15 @@ export default function App() {
   }, [explicitDefaultYear]);
 
   const handleDownloadIndividual = useCallback((event: CalendarEvent) => {
+    const validationWarnings = getBlockingValidationWarnings(event);
+
+    if (validationWarnings.length > 0) {
+      toast.error('Fix this event before exporting', {
+        description: validationWarnings.join(' '),
+      });
+      return;
+    }
+
     try {
       const singleEventICS = generateCleanICS([event]);
       const blob = new Blob([singleEventICS], { type: 'text/calendar;charset=utf-8' });
@@ -386,7 +421,17 @@ export default function App() {
   }, []);
 
   const handleUpdateEvent = useCallback((eventId: string, updates: Partial<CalendarEvent>) => {
-    setEvents(prev => prev.map(e => e.id === eventId ? { ...e, ...updates } : e));
+    setEvents(prev => prev.map((event) => {
+      if (event.id !== eventId) return event;
+
+      const updatedEvent = { ...event, ...updates };
+      const validationWarnings = validateCalendarEvent(updatedEvent);
+
+      return {
+        ...updatedEvent,
+        validationWarnings: mergeEventValidationWarnings(updatedEvent.validationWarnings, validationWarnings),
+      };
+    }));
   }, []);
 
   const handlePolishDescription = useCallback(async (eventId: string, description: string) => {
@@ -406,6 +451,18 @@ export default function App() {
 
   const handleExport = useCallback(() => {
     if (events.length === 0) return;
+
+    const invalidEvents = events
+      .map((event) => ({ event, validationWarnings: getBlockingValidationWarnings(event) }))
+      .filter(({ validationWarnings }) => validationWarnings.length > 0);
+
+    if (invalidEvents.length > 0) {
+      toast.error('Fix invalid events before exporting', {
+        description: `${invalidEvents.length} ${invalidEvents.length === 1 ? 'event has' : 'events have'} date or required-field issues.`,
+      });
+      return;
+    }
+
     setIsLoading(true);
 
     try {
