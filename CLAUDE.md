@@ -20,7 +20,7 @@ npm run test:long-document-fixture  # asserts fixtures/long-document-event-after
                                     # still has its event past char 15,000
 ```
 
-There is no test runner. `test:long-document-fixture` is a guard script, not a test suite — it only verifies the fixture that exists to prove long documents aren't truncated. `npm run lint` is the closest thing to a full check; run it before pushing (CI does not run it — `.github/workflows/deploy.yml` only builds and publishes to GitHub Pages on `main`).
+There is no test runner. `test:long-document-fixture` is a guard script, not a test suite — it only verifies the fixture that exists to prove long documents aren't truncated. `npm run lint` is the closest thing to a full check; run it before pushing. There are no GitHub Actions workflows at all, so nothing lints or tests on push — the only automation is Vercel, which builds `main` (and every PR as a preview) using the settings in `vercel.json`. A broken build therefore shows up as a failed Vercel deployment, not as a failed check.
 
 TypeScript is configured with `strict: false` and most safety flags off, so `tsc --noEmit` catches far less than usual.
 
@@ -58,7 +58,7 @@ Single-page React 19 + Vite app. No router, no backend, no persistence — state
 
 ## Environment
 
-`VITE_BLINK_PROJECT_ID` and `VITE_BLINK_PUBLISHABLE_KEY`. Both `lib/blink.ts` and `main.tsx` independently duplicate a `getProjectId()` that falls back to the `*.sites.blink.new` hostname and then to a hardcoded project id — change both together. `.env.local` is committed with publishable (client-side) values.
+`VITE_BLINK_PROJECT_ID` and `VITE_BLINK_PUBLISHABLE_KEY`. Both `lib/blink.ts` and `main.tsx` independently duplicate a `getProjectId()` that falls back to the `*.sites.blink.new` hostname and then to a hardcoded project id — change both together. `.env` is committed with publishable (client-side) values; `.env.local` is gitignored and overrides it, and real environment variables (Vercel project settings) override both.
 
 `index.html` loads `https://blink.new/auto-engineer.js` behind a comment marked do-not-remove; leave it alone.
 
