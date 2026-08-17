@@ -41,7 +41,12 @@ bun install
 
 ### 2. Configure environment variables
 
-Create a `.env.local` file in the project root (or copy the existing one):
+Nothing to do for the default setup — `.env` is committed with this project's Blink
+publishable credentials, so the app runs as-is. These are *publishable* client-side keys
+that get embedded in the browser bundle by design (see the security note below).
+
+To point the app at a different Blink project, create a `.env.local` file, which is
+gitignored and overrides `.env`:
 
 ```env
 VITE_BLINK_PROJECT_ID=your-blink-project-id
@@ -88,15 +93,35 @@ Because the output is a static site (HTML + JS + CSS), it can be deployed to any
 
 ### Option 1 – Vercel (recommended)
 
-1. Push your repository to GitHub.
-2. Go to [vercel.com](https://vercel.com) and import the repository.
-3. Vercel auto-detects Vite. Accept the defaults:
-   - **Build command:** `npm run build`
-   - **Output directory:** `dist`
-4. Add environment variables in **Settings → Environment Variables**:
-   - `VITE_BLINK_PROJECT_ID`
-   - `VITE_BLINK_PUBLISHABLE_KEY`
-5. Click **Deploy**.
+Build settings are committed in [`vercel.json`](./vercel.json), so there is nothing to
+configure in the import wizard:
+
+- **Framework:** Vite
+- **Build command:** `npm run build`
+- **Output directory:** `dist`
+- **Rewrites:** all unmatched paths fall through to `/index.html` (static files in
+  `dist/` still win, since Vercel checks the filesystem before applying rewrites)
+- **Headers:** hashed files under `/assets/` get a one-year immutable cache
+
+**Deploy via the dashboard**
+
+1. Push the repository to GitHub.
+2. Go to [vercel.com/new](https://vercel.com/new) and import it.
+3. Click **Deploy**.
+
+**Deploy via the CLI**
+
+```bash
+npm i -g vercel
+vercel link      # once, to associate the directory with a Vercel project
+vercel --prod
+```
+
+Because `.env` is committed, the Blink project ID and publishable key are already picked
+up at build time and no dashboard configuration is required. To point a deployment at a
+different Blink project, set `VITE_BLINK_PROJECT_ID` and `VITE_BLINK_PUBLISHABLE_KEY`
+under **Settings → Environment Variables** — real environment variables take precedence
+over both `.env` and `.env.local`.
 
 ### Option 2 – Netlify
 
@@ -181,6 +206,14 @@ scp -r dist/ user@your-server:/var/www/ics-app/
 |----------|----------|-------------|
 | `VITE_BLINK_PROJECT_ID` | Yes | Your Blink project ID (found in the Blink dashboard) |
 | `VITE_BLINK_PUBLISHABLE_KEY` | Yes | Your Blink publishable API key |
+
+Resolution order, lowest priority first:
+
+1. Hardcoded fallbacks in `src/lib/blink.ts` (also infers the project ID from a
+   `*.sites.blink.new` hostname)
+2. `.env` — committed, holds this project's publishable credentials
+3. `.env.local` — gitignored, for local overrides
+4. Real environment variables (e.g. Vercel project settings), which win over everything
 
 > **Security note:** These are *publishable* (client-side) keys intended to be embedded in the browser bundle. Never commit or expose your Blink *secret* keys.
 
