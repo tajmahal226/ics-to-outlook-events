@@ -88,15 +88,35 @@ Because the output is a static site (HTML + JS + CSS), it can be deployed to any
 
 ### Option 1 – Vercel (recommended)
 
-1. Push your repository to GitHub.
-2. Go to [vercel.com](https://vercel.com) and import the repository.
-3. Vercel auto-detects Vite. Accept the defaults:
-   - **Build command:** `npm run build`
-   - **Output directory:** `dist`
-4. Add environment variables in **Settings → Environment Variables**:
-   - `VITE_BLINK_PROJECT_ID`
-   - `VITE_BLINK_PUBLISHABLE_KEY`
-5. Click **Deploy**.
+Build settings are committed in [`vercel.json`](./vercel.json), so there is nothing to
+configure in the import wizard:
+
+- **Framework:** Vite
+- **Build command:** `npm run build`
+- **Output directory:** `dist`
+- **Rewrites:** all unmatched paths fall through to `/index.html` (static files in
+  `dist/` still win, since Vercel checks the filesystem before applying rewrites)
+- **Headers:** hashed files under `/assets/` get a one-year immutable cache
+
+**Deploy via the dashboard**
+
+1. Push the repository to GitHub.
+2. Go to [vercel.com/new](https://vercel.com/new) and import it.
+3. Click **Deploy**.
+
+**Deploy via the CLI**
+
+```bash
+npm i -g vercel
+vercel link      # once, to associate the directory with a Vercel project
+vercel --prod
+```
+
+Because `.env.local` is checked into the repository, the Blink project ID and
+publishable key are already picked up at build time and no dashboard configuration is
+required. To point a deployment at a different Blink project, set
+`VITE_BLINK_PROJECT_ID` and `VITE_BLINK_PUBLISHABLE_KEY` under **Settings →
+Environment Variables** — real environment variables take precedence over `.env.local`.
 
 ### Option 2 – Netlify
 
