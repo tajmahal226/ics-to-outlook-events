@@ -78,10 +78,18 @@ Each provider spells that differently, and this is where the work concentrates:
 
 - **Anthropic** — `output_config.format`, or `messages.parse()`.
 - **OpenAI-shape** — `response_format: {type: "json_schema", ...}` with
-  `strict: true`. Support varies across the compatible providers: OpenAI
-  proper honours strict mode; OpenRouter's support depends on the model behind
-  it; x.ai needs confirming.
-- **Gemini** — `responseMimeType` + `responseSchema`.
+  `strict: true`. Confirmed on OpenAI and on x.ai (`response_format.type =
+  "json_schema"`). **OpenRouter is the exception worth designing for:** strict
+  mode support depends on *which provider is currently serving the chosen
+  model*, not on the model itself, so the same model id can support it on one
+  routing and not another. Treat OpenRouter as never guaranteed and always run
+  the validating fallback path.
+- **Gemini** — a `response_format` object carrying `type`, `mime_type:
+  "application/json"`, and `schema`. Gemini accepts a *subset* of JSON Schema;
+  `EVENT_SCHEMA` uses only supported keywords (`object`, `properties`,
+  `required`, `array`/`items`, `string`, `boolean`, `description`), so it maps
+  across as-is. Deeply nested or very large schemas can be rejected — not a
+  concern at this schema's size.
 
 Adapters normalise this behind `extractEvents`. Where a provider cannot
 guarantee schema conformance, the adapter falls back to instructing JSON in the
@@ -192,17 +200,36 @@ VITE_BLINK_* from .env, README, CLAUDE.md
    already warning at 667 kB. Adapters and parsers should be dynamically
    imported so only the chosen provider and the formats actually used load.
 
-## To confirm during implementation
+## Verified
 
-These were not verified against primary docs while writing this spec and must
-be checked before the code depending on them is considered done:
+Checked against primary docs and by live request on 2026-08-29.
 
-- exact `response_format` / strict-mode support on x.ai and OpenRouter
-- Gemini's `responseSchema` shape versus `EVENT_SCHEMA`
-- whether all five endpoints send CORS headers permitting direct browser calls
-  (Anthropic and OpenAI gate this behind `dangerouslyAllowBrowser`, which
-  implies yes; OpenRouter and x.ai need a live check)
-- current base URL paths for OpenRouter and x.ai
+**CORS — every endpoint permits direct browser calls.** Measured with an
+`OPTIONS` preflight carrying `Origin`, `Access-Control-Request-Method: POST`,
+and the auth headers each SDK sends:
+
+| Endpoint | Result |
+|---|---|
+| `api.anthropic.com/v1/messages` | `allow-origin: *`; allow-headers names `anthropic-dangerous-direct-browser-access` |
+| `api.openai.com/v1/chat/completions` | reflects origin; `authorization, content-type` |
+| `openrouter.ai/api/v1/chat/completions` | `allow-origin: *`; allow-headers includes the `X-Stainless-*` set the OpenAI SDK emits, so the SDK works against it unmodified |
+| `api.x.ai/v1/chat/completions` | `allow-origin: *`; methods and headers both `*` |
+| `generativelanguage.googleapis.com` | reflects origin; allows `x-goog-api-key` |
+
+This removes the last structural doubt: no proxy is needed for any of the five.
+
+**Base URLs:** `https://api.x.ai/v1` and `https://openrouter.ai/api/v1`, both
+confirmed from their own documentation.
+
+**Structured output:** confirmed per provider in the section above. The single
+substantive caveat is OpenRouter's routing-dependent strict mode.
+
+Still genuinely unknown, and only answerable by running it:
+
+- whether `@kenjiuno/msgreader` handles real `.msg` files well enough to keep
+  the format (risk 1)
+- real-world extraction quality per provider on an actual agenda, which is a
+  judgement call rather than a fact to look up
 
 ## Verification
 
