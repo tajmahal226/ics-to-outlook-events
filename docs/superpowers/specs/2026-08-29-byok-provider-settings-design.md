@@ -150,6 +150,68 @@ interface gains an image-bearing call.
 - **The source-text view will be empty** for image inputs. The "Source text"
   tab should say so rather than render a blank pane.
 
+### OCR quality is a resolution problem before it is a model problem
+
+The cheap-tier defaults were chosen on price. Checked against each provider's
+vision documentation, **one of them would have quietly ruined the OCR path**,
+and the reason generalises: every provider degrades small text, and each one
+gives a different lever to stop it.
+
+| Provider | What it does to a large image | The lever |
+|---|---|---|
+| **Anthropic** | **Downscales** to the model's tier cap: 1568 px long edge on standard, 2576 px on Claude 4.7 and later | Must use a 4.7-or-later model. There is no parameter that rescues a standard-tier model. |
+| **Gemini** | **Tiles** into 768×768 blocks at 258 tokens each — resolution is preserved, not discarded | `media_resolution`; higher "improve[s] the model's ability to read fine text" |
+| **OpenAI** | Patch-based, capped by a patch budget per `detail` level | `detail: "original"` — "fits within 65,535 × 65,535 pixels, with no patch-budget limit", and the docs explicitly recommend it for text-heavy images |
+
+**`claude-haiku-4-5` is standard tier.** A 300 DPI A4 scan is roughly
+2480×3508 px; downscaled to a 1568 px long edge it becomes ~1108×1568, about
+130 DPI. Anthropic's own guidance says this plainly — resizing "might, for
+example, make text less legible" — and names *dense documents* as the case that
+needs the high-resolution tier. Haiku would have been the wrong default for
+precisely the input this feature exists to handle.
+
+Three consequences:
+
+**1. Two model settings, not one.** The text path is only *structuring* text
+that has already been extracted losslessly; the cheap tier is genuinely fine
+there. The vision path must *read pixels*. They are different jobs and get
+different defaults:
+
+| Provider | Text path | Vision / OCR path |
+|---|---|---|
+| Gemini | `gemini-2.5-flash-lite` ($0.10/$0.40) | `gemini-2.5-flash` ($0.30/$2.50), `media_resolution` high |
+| OpenAI | `gpt-5-nano` ($0.05/$0.40) | `gpt-5-mini` ($0.25/$2.00), `detail: "original"` |
+| Anthropic | `claude-haiku-4-5` ($1/$5) | `claude-sonnet-5` ($2/$10) — cheapest high-resolution tier |
+| x.ai | `grok-4.3` ($1.25/$2.50) | `grok-4.3` — image handling unverified, see below |
+
+Settings shows both, defaulted, with the vision one labelled as the one that
+reads scans and photos.
+
+**2. Each adapter must set its provider's OCR flag.** `detail: "original"` and
+`media_resolution` are not optional tuning — omitting them silently reverts to
+the degraded path. This belongs in the adapter, not in user-facing settings.
+
+**3. Rasterisation DPI and tiling are ours to control, and are the strongest
+lever.** Because we render PDF pages ourselves via `pdfjs-dist`, we choose the
+output resolution. Rendering a page and letting a provider downscale it wastes
+the fidelity we just produced. Instead: render at high DPI, then split into
+tiles sized to stay under the provider's threshold, so full resolution reaches
+the model.
+
+The tradeoff is real and must be handled: tiling destroys layout context, and
+on a schedule the layout *is* information — which time column a session sits
+in, which room heading governs which block. Anthropic's guidance warns against
+"cropping out key visual context solely to enlarge the text". So tiles overlap,
+and each page is also sent whole at lower resolution to carry structure. More
+images also means more tokens, and above 20 images per request Anthropic
+applies a stricter 2000 px per-image cap — so tile counts stay bounded.
+
+Cost stays modest even so: Gemini's tiling puts a 10-page agenda near 15k input
+tokens, well under a cent at flash rates; Anthropic's high-resolution tier runs
+about 4,784 visual tokens per full page, so the same document is roughly
+$0.10–0.15 on Sonnet 5. The OCR path costs more than the text path, and it
+should — it is doing more.
+
 ### Interface, revised for images
 
 ```ts
@@ -169,21 +231,23 @@ this matches the pattern already present. Fields: provider, model, API key,
 and a **Test connection** button that makes one cheap call so a bad key is
 found before it costs an upload.
 
-**Defaults are the cheap tier, not the flagship.** Verified pricing per million
-tokens, all vision-capable:
+**Two model settings, cheap by default but not uniformly** — see *OCR quality
+is a resolution problem* below for why the vision path cannot use the cheapest
+tier. Verified pricing per million tokens; all listed models are
+vision-capable, but not all read fine text well.
 
-| Provider | Default model | In / Out |
+| Provider | Text path | Vision / OCR path |
 |---|---|---|
-| OpenAI | `gpt-5-nano` | $0.05 / $0.40 |
-| Google Gemini | `gemini-2.5-flash-lite` | $0.10 / $0.40 |
-| OpenRouter | `google/gemini-2.5-flash-lite` | $0.10 / $0.40 |
-| Anthropic | `claude-haiku-4-5` | $1.00 / $5.00 |
-| x.ai | `grok-4.3` | $1.25 / $2.50 |
+| OpenAI | `gpt-5-nano` ($0.05/$0.40) | `gpt-5-mini` ($0.25/$2.00) |
+| Google Gemini | `gemini-2.5-flash-lite` ($0.10/$0.40) | `gemini-2.5-flash` ($0.30/$2.50) |
+| OpenRouter | `google/gemini-2.5-flash-lite` | `google/gemini-2.5-flash` |
+| Anthropic | `claude-haiku-4-5` ($1/$5) | `claude-sonnet-5` ($2/$10) |
+| x.ai | `grok-4.3` ($1.25/$2.50) | `grok-4.3` |
 
-At these rates a ~60k-character agenda costs well under a cent on the OpenAI
-and Gemini defaults, against roughly $0.25–0.30 on a flagship. The dialog shows
-the selected model plainly so nobody is surprised by either the cost or the
-quality; upgrading is one dropdown away.
+On the text path a ~60k-character agenda costs well under a cent on the OpenAI
+and Gemini defaults, against roughly $0.25–0.30 on a flagship. The OCR path
+costs more and should. The dialog shows both selections plainly so nobody is
+surprised by either cost or quality; upgrading is one dropdown away.
 
 **Model lists are fetched live, not hardcoded.** Every provider exposes a models
 endpoint (`/v1/models` on Anthropic, OpenAI, and x.ai; `/api/v1/models` on
@@ -280,12 +344,23 @@ the list only changes in a single place.
    same document, since a rasterised page is worth more tokens than its text.
    The settings dialog should not hide which model is selected.
 
-6. **Cheap models may extract less well.** The defaults above are chosen on
-   price, and the product's whole value is the quality of the extraction. This
-   is worth measuring on a real agenda before settling: if a nano-tier model
-   misses sessions a flagship catches, the right default is the one that gets
-   the schedule right, not the one that costs least. Treat the table as a
-   starting point to be validated, not a conclusion.
+6. **Cheap models may extract less well, and OCR is where it bites.** The
+   resolution analysis below sets defaults that should be adequate, but
+   adequate is a prediction, not a measurement. The product's whole value is
+   extraction quality. Before these defaults are called settled, run a real
+   scanned agenda through each provider's vision default and compare against a
+   flagship on the same input: if the cheaper model drops sessions, misreads
+   times, or transposes columns, the right default is the one that gets the
+   schedule right. This is the single most important thing to measure, and it
+   cannot be resolved from documentation — only by running it.
+
+7. **x.ai's image handling is unverified.** Anthropic, Gemini, and OpenAI all
+   document their resolution behaviour and their OCR levers; x.ai's docs cover
+   structured outputs but not image preprocessing. Grok may downscale, tile, or
+   cap in ways that hurt dense scans, with no known parameter to opt out.
+   Until that is established, treat x.ai as supported for the text path and
+   unproven for OCR, and say so in the settings dialog rather than letting
+   someone discover it on a scan.
 4. **`pdfjs-dist` ships a worker** and needs its worker URL wired for Vite.
    Routine, but it is the usual place a PDF integration breaks in a bundler.
 5. **Bundle size.** Four parser libraries plus three SDKs land in a bundle
@@ -323,13 +398,26 @@ OpenRouter's prefixed ids (`claude-haiku-4-5` natively vs
 `anthropic/claude-haiku-4.5` through OpenRouter); the adapters own that mapping,
 and the live model fetch makes a wrong default self-correcting.
 
+**Image resolution behaviour**, read from each provider's vision docs on
+2026-08-29 and summarised in *OCR quality is a resolution problem*: Anthropic
+downscales to 1568 px (standard) or 2576 px (Claude 4.7+); Gemini tiles at
+768×768 and exposes `media_resolution`; OpenAI is patch-based with a `detail`
+parameter whose `"original"` setting removes the patch budget and is explicitly
+recommended for text-heavy images. This is what disqualified `claude-haiku-4-5`
+as the OCR default.
+
 Still genuinely unknown, and only answerable by running it:
 
 - whether `utif` → canvas → PNG handles real multi-page TIFFs (risk 1)
 - whether the empty-text heuristic reliably distinguishes a scanned PDF from a
   sparse one
-- real-world extraction quality per provider and per tier on an actual agenda,
-  which is a judgement call rather than a fact to look up (risk 6)
+- **real extraction accuracy per provider on a real scanned agenda** — the
+  defaults above are reasoned from resolution limits, which is a much better
+  basis than price alone, but it is still reasoning rather than measurement
+  (risk 6)
+- x.ai's image preprocessing, undocumented as far as could be found (risk 7)
+- the tile size and overlap that preserve schedule layout while keeping text
+  legible; this needs tuning against a real agenda, not choosing up front
 
 ## Verification
 
@@ -357,8 +445,13 @@ Still genuinely unknown, and only answerable by running it:
 2. `extractText.ts` for the text formats (`.txt`, `.md`, `.pdf`, `.docx`,
    `.eml`). At this point Blink is out of the AI path entirely.
 3. `extractImages.ts` and the vision branch: images first, then the scanned-PDF
-   rasterise fallback. **Spike `.tiff` at the start of this step** — it may cut
-   scope, and finding that out before the rest is built is cheaper.
+   rasterise fallback, then tiling. **Spike `.tiff` at the start of this step**
+   — it may cut scope, and finding that out before the rest is built is
+   cheaper. **End this step by running one real scanned agenda through the
+   vision default and a flagship side by side** (risk 6). Tile size, overlap,
+   and rasterisation DPI get tuned against that result rather than guessed;
+   if the cheap default drops sessions, the default changes here, before the
+   remaining adapters are written against it.
 4. OpenAI-shape adapter, then OpenRouter and x.ai as presets over it.
 5. Gemini adapter.
 6. Remove Blink; update README, CLAUDE.md, `index.html` title.
