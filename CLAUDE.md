@@ -4,6 +4,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Commands
 
+Node `^20.19.0 || >=22.12.0` (`engines` in `package.json`; the README's "Node 18 or later" is stale).
+
 ```bash
 npm install
 npm run dev        # Vite dev server on port 3000 (strictPort — fails if taken)
@@ -31,12 +33,14 @@ Single-page React 19 + Vite app. No router, no backend, no persistence — state
 **The whole extraction pipeline lives in `src/App.tsx`** (top-level helpers above the component). Only three small modules sit under `src/lib/`:
 
 - `lib/ics.ts` — `CalendarEvent` type plus `parseICS`/`generateCleanICS` over `ical.js`. Single source of truth for the event shape.
-- `lib/events.ts` — validation. Warnings are plain strings prefixed with `EVENT_VALIDATION_WARNING_PREFIX`; that prefix is how `mergeEventValidationWarnings` tells its own warnings apart from AI-supplied year warnings and replaces only its own on re-validation. `hasBlockingValidationWarnings` gates export.
+- `lib/events.ts` — validation. Warnings are plain strings prefixed with `EVENT_VALIDATION_WARNING_PREFIX`; that prefix is how `mergeEventValidationWarnings` tells its own warnings apart from AI-supplied year warnings and replaces only its own on re-validation.
 - `lib/blink.ts` — Blink SDK client (`authRequired: false`).
+
+**Two tiers of warning, and they are computed differently.** `event.validationWarnings` is a *stored, advisory* list — it holds the year-ambiguity messages from `getYearValidationWarnings` and drives the "needs review" counts and badges in `EventList`. Blocking is *recomputed on demand*: `getBlockingValidationWarnings` / `hasBlockingValidationWarnings` call `validateCalendarEvent` afresh and ignore the stored array entirely. So only a missing summary, an invalid date, or `end <= start` can block — an AI year warning never stops an export. `App.tsx` gates both export paths with `getBlockingValidationWarnings`; `EventList` uses `hasBlockingValidationWarnings` to disable per-event download and to blank the Google/Outlook deep links to `'#'`. Adding a new blocking rule means editing `validateEventFields`, not pushing a string into `validationWarnings`.
 
 ### Two input paths
 
-`.ics` uploads are parsed locally by `parseICS` — no AI call. Everything else (`.pdf`, `.txt`, `.eml`, `.msg`, `.docx`; extension allowlist in `UploadZone.tsx`) goes through the AI flow.
+`.ics` uploads are parsed locally by `parseICS` — no AI call. Everything else (`.pdf`, `.txt`, `.eml`, `.msg`, `.docx`) goes through the AI flow. The allowlist appears twice in `UploadZone.tsx` — the `allowedExtensions` array and the `<input accept>` attribute — change both together.
 
 ### AI extraction flow (`handleFileLoaded`)
 
@@ -46,13 +50,17 @@ Single-page React 19 + Vite app. No router, no backend, no persistence — state
 4. Per-event validation: events failing `validateEventFields` are dropped and reported in a toast; survivors are mapped and re-validated.
 5. `dedupeEvents` merges chunk results on normalized `summary|startDate|endDate|location`.
 
+`generateObject` is not the only model call: the per-event "polish" button runs `handlePolishDescription` → `blink.ai.generateText` to rewrite one event's description in place.
+
 ### Year inference
 
 `buildDefaultYearPlan` resolves the fallback year in strict precedence: user-selected dropdown → years found in the document text → years found in the filename → date-based fallback (`getDateBasedFallbackYear` rolls to next year from October onward). When more than one year is found, or the date-based fallback is used, the plan is marked `isAmbiguous` and every event resting on that year gets a review warning. The AI schema also returns `ambiguousYear` / `yearInferenceReason` / `yearSourceText`, folded in by `getYearValidationWarnings`. Changes here should keep both the plan description shown in the UI and the prompt text in sync — `describeDefaultYearPlan` feeds both.
 
 ## UI conventions
 
-`src/components/ui/` is generated shadcn/ui (new-york style, `components.json`, `tailwind.config.cjs`) — treat it as vendored; edit app code in `App.tsx`, `UploadZone.tsx`, `EventList.tsx` instead. Toasts are `sonner`, animation is `framer-motion`, icons are `lucide-react`.
+`src/components/ui/` is generated shadcn/ui (new-york style, `components.json`, `tailwind.config.cjs`) — treat it as vendored; edit app code in `App.tsx`, `UploadZone.tsx`, `EventList.tsx` instead. Toasts are `sonner` — `App.tsx` mounts sonner's `<Toaster>`. The vendored shadcn toast stack (`hooks/use-toast.ts` → `ui/toast.tsx`, `ui/toaster.tsx`) and the `react-hot-toast` dependency are never mounted; wiring a new notification into them produces nothing on screen. Animation is `framer-motion`, icons are `lucide-react`.
+
+`darkMode: ["class"]` and the `.dark` block in `index.css` are configured but nothing ever sets the class, so dark styles are currently unreachable.
 
 `src/index.css` still carries the Blink template's placeholder-palette comments telling an agent to replace the colors; the palette has since been customized, so ignore that instruction unless asked to restyle.
 
@@ -65,3 +73,5 @@ Single-page React 19 + Vite app. No router, no backend, no persistence — state
 ## Dead code
 
 `src/main.ts`, `src/counter.ts`, `src/style.css`, `src/App.css`, and `src/typescript.svg` are leftovers from the Vite vanilla-TS template. The real entry is `src/main.tsx` → `src/App.tsx`, and the only stylesheet in use is `src/index.css`.
+
+`glass-card` is applied in `App.tsx`, `EventList.tsx`, and `UploadZone.tsx` but is defined nowhere — no CSS rule, and the only Tailwind plugin is `tailwindcss-animate`. It currently styles nothing.
