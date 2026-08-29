@@ -7,14 +7,22 @@ import { cn } from '@/lib/utils';
 interface UploadZoneProps {
   onFileLoaded: (file: File) => void;
   isLoading: boolean;
+  /** False when no API key is set. `.ics` still works; everything else needs one. */
+  aiAvailable?: boolean;
 }
 
-const ACCEPTED_EXTENSIONS = ['.ics', '.pdf', '.txt', '.eml', '.msg', '.docx'];
+const ACCEPTED_EXTENSIONS = ['.ics', '.pdf', '.txt', '.md', '.docx', '.eml'];
+
+/** Parsed on this device with ical.js, so it never needs a provider or a key. */
+const LOCAL_ONLY_EXTENSIONS = ['.ics'];
 
 const hasAcceptedExtension = (fileName: string) =>
   ACCEPTED_EXTENSIONS.some((ext) => fileName.toLowerCase().endsWith(ext));
 
-export function UploadZone({ onFileLoaded, isLoading }: UploadZoneProps) {
+const isLocalOnly = (fileName: string) =>
+  LOCAL_ONLY_EXTENSIONS.some((ext) => fileName.toLowerCase().endsWith(ext));
+
+export function UploadZone({ onFileLoaded, isLoading, aiAvailable = true }: UploadZoneProps) {
   const [isDraggingOver, setIsDraggingOver] = useState(false);
 
   const acceptFile = useCallback(
@@ -26,9 +34,18 @@ export function UploadZone({ onFileLoaded, isLoading }: UploadZoneProps) {
         return;
       }
 
+      // Refuse here rather than letting the request fail at the provider, so
+      // the reason names the fix instead of surfacing an auth error.
+      if (!aiAvailable && !isLocalOnly(file.name)) {
+        toast.error('Add an API key to read this file', {
+          description: 'Open Settings to choose a provider. Calendar files (.ics) work without one.',
+        });
+        return;
+      }
+
       onFileLoaded(file);
     },
-    [onFileLoaded]
+    [onFileLoaded, aiAvailable]
   );
 
   const handleFileChange = useCallback(

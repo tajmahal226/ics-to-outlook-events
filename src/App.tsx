@@ -13,9 +13,13 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
+import { SettingsDialog } from '@/components/SettingsDialog';
 import { parseICS, generateCleanICS, CalendarEvent } from '@/lib/ics';
 import { getBlockingValidationWarnings, getEventValidationMessage, mergeEventValidationWarnings, validateCalendarEvent, validateEventFields } from '@/lib/events';
-import { blink } from '@/lib/blink';
+import { ExtractionResultSchema } from '@/lib/eventSchema';
+import { extractTextFromFile } from '@/lib/extractText';
+import { ProviderSettings, createProvider, hasUsableProvider } from '@/lib/providers';
+import { loadSettings } from '@/lib/settings';
 
 
 const EXTRACTION_CHUNK_SIZE = 12000;
@@ -243,30 +247,6 @@ const mapAiEventToCalendarEvent = (event: any, defaultYearPlan: DefaultYearPlan)
   validationWarnings: getYearValidationWarnings(event, defaultYearPlan),
 });
 
-const EVENT_SCHEMA = {
-  type: 'object',
-  properties: {
-    events: {
-      type: 'array',
-      items: {
-        type: 'object',
-        properties: {
-          summary: { type: 'string', description: 'Title of the event' },
-          description: { type: 'string', description: 'Brief details about the event' },
-          location: { type: 'string', description: 'Where the event takes place' },
-          startDate: { type: 'string', description: 'ISO 8601 date string' },
-          endDate: { type: 'string', description: 'ISO 8601 date string' },
-          allDay: { type: 'boolean' },
-          ambiguousYear: { type: 'boolean', description: 'True when the event year was inferred from weak, conflicting, or fallback context' },
-          yearInferenceReason: { type: 'string', description: 'Short explanation of how the event year was chosen, especially if ambiguous' },
-          yearSourceText: { type: 'string', description: 'Exact nearby source text containing an explicit year, when available' }
-        },
-        required: ['summary', 'startDate', 'endDate']
-      }
-    }
-  },
-  required: ['events']
-};
 
 export default function App() {
   const [events, setEvents] = useState<CalendarEvent[]>([]);
@@ -277,6 +257,10 @@ export default function App() {
   const [yearInferenceStatus, setYearInferenceStatus] = useState<string>('');
   const [explicitDefaultYear, setExplicitDefaultYear] = useState<number | null>(null);
   const [isPolishing, setIsPolishing] = useState<string | null>(null);
+  // Read once on mount; localStorage can throw, and loadSettings absorbs that.
+  const [settings, setSettings] = useState<ProviderSettings | null>(() => loadSettings());
+
+  const canUseAi = hasUsableProvider(settings);
 
   const currentYear = new Date().getFullYear();
   const fallbackYearPreview = useMemo(() => buildDefaultYearPlan({ userSelectedYear: explicitDefaultYear }), [explicitDefaultYear]);
@@ -298,17 +282,33 @@ export default function App() {
         const defaultYearPlan = buildDefaultYearPlan({ sourceText: content, fileName: file.name, userSelectedYear: explicitDefaultYear });
         setYearInferenceStatus(`ICS import preserved event years from the calendar file. ${describeDefaultYearPlan(defaultYearPlan)}`);
       } else {
-        // AI Extraction Flow
-        toast.info('Analyzing schedule with AI...', {
-          description: 'Your document is sent directly for extraction without creating a public storage URL.',
+        // AI Extraction Flow. Requires a provider; .ics above never does.
+        const provider = createProvider(settings);
+
+        toast.info('Reading the document...', {
+          description: 'The file is parsed on this device. Only the text it contains is sent on.',
           icon: <Sparkles className="w-5 h-5 text-primary" />,
         });
 
-        // 1. Extract text directly from the uploaded file blob. This avoids
-        // creating public storage objects or exposing original filenames in URLs.
-        const extractedText = await blink.data.extractFromBlob(file);
-        const text = Array.isArray(extractedText) ? extractedText.join('\n') : extractedText;
+        // 1. Parse the file to text in the browser. Nothing is uploaded to be
+        // read, so the document itself never leaves the device.
+        const { text, looksLikeScan } = await extractTextFromFile(file);
         setRawText(text);
+
+        if (!text) {
+          throw new Error(
+            looksLikeScan
+              ? 'This looks like a scan, so there is no text to read. Reading scans is not supported yet.'
+              : 'No text could be read from this file.'
+          );
+        }
+
+        if (looksLikeScan) {
+          toast.warning('This document may be a scan', {
+            description: 'Very little text was found, so events may be missing. Reading scans is not supported yet.',
+            icon: <AlertCircle className="w-5 h-5" />,
+          });
+        }
 
         const defaultYearPlan = buildDefaultYearPlan({ sourceText: text, fileName: file.name, userSelectedYear: explicitDefaultYear });
         const defaultYearDescription = describeDefaultYearPlan(defaultYearPlan);
@@ -336,12 +336,12 @@ export default function App() {
             toast.info(`Extracting section ${index + 1} of ${chunks.length}...`);
           }
 
-          const { object } = await blink.ai.generateObject({
-            prompt: buildEventExtractionPrompt(chunk, index + 1, chunks.length, defaultYearPlan),
-            schema: EVENT_SCHEMA as any,
-          });
+          const result = await provider.extractEvents(
+            buildEventExtractionPrompt(chunk, index + 1, chunks.length, defaultYearPlan),
+            ExtractionResultSchema
+          );
 
-          ((object as any).events || []).forEach((event: any, eventIndex: number) => {
+          result.events.forEach((event: any, eventIndex: number) => {
             const validationWarnings = validateEventFields({
               summary: event?.summary,
               startDate: event?.startDate,
@@ -398,7 +398,7 @@ export default function App() {
     } finally {
       setIsLoading(false);
     }
-  }, [explicitDefaultYear]);
+  }, [explicitDefaultYear, settings]);
 
   const handleDownloadIndividual = useCallback((event: CalendarEvent) => {
     const validationWarnings = getBlockingValidationWarnings(event);
@@ -442,17 +442,19 @@ export default function App() {
   const handlePolishDescription = useCallback(async (eventId: string, description: string) => {
     setIsPolishing(eventId);
     try {
-      const { text } = await blink.ai.generateText({
-        prompt: `Clean up and format this calendar event description into professional bullet points. Remove any messy fragments or artifacts from PDF extraction. Keep it concise. Description: ${description}`,
-      });
+      const text = await createProvider(settings).polishText(
+        `Clean up and format this calendar event description into professional bullet points. Remove any messy fragments or artifacts from PDF extraction. Keep it concise. Description: ${description}`
+      );
       handleUpdateEvent(eventId, { description: text.trim() });
-      toast.success('Description polished!');
-    } catch (error) {
-      toast.error('Failed to polish description');
+      toast.success('Description tidied up');
+    } catch (error: any) {
+      toast.error('Could not tidy up the description', {
+        description: error?.message,
+      });
     } finally {
       setIsPolishing(null);
     }
-  }, [handleUpdateEvent]);
+  }, [handleUpdateEvent, settings]);
 
   const handleExport = useCallback(() => {
     if (events.length === 0) return;
@@ -518,6 +520,8 @@ export default function App() {
           </div>
 
           <div className="flex items-center gap-1 md:gap-2">
+            <SettingsDialog settings={settings} onSettingsChange={setSettings} />
+
             <Dialog>
               <DialogTrigger asChild>
                 <Button
@@ -595,7 +599,7 @@ export default function App() {
                     transition={{ duration: 0.5, ease: [0.2, 0.7, 0.3, 1] }}
                     className="rail-body pb-8 md:pb-12"
                   >
-                    <p className="eyebrow mb-4">PDF &middot; Email &middot; Docx &middot; ICS</p>
+                    <p className="eyebrow mb-4">PDF &middot; Word &middot; Email &middot; Text &middot; ICS</p>
                     <h2 className="text-4xl font-extrabold leading-[1.04] tracking-[-0.035em] md:text-6xl">
                       Read the agenda once.
                     </h2>
@@ -635,11 +639,31 @@ export default function App() {
                   </div>
                 </div>
 
+                {!canUseAi && (
+                  <div className="rail-row">
+                    <div className="rail-time" />
+                    <div className="rail-body">
+                      <div className="border-l-2 border-accent bg-card px-4 py-3">
+                        <p className="eyebrow mark-amber mb-1">No AI provider yet</p>
+                        <p className="text-xs leading-relaxed text-muted-foreground md:text-sm">
+                          Calendar files (.ics) work right now — they are read on this device. To pull
+                          events out of a PDF, Word file, email or text file, add your own API key in
+                          Settings.
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
                 <div className="rail-row">
                   <div className="rail-time">{EMPTY_TIME_LABEL}</div>
                   <div className="rail-node rail-node-empty" aria-hidden="true" />
                   <div className="rail-body">
-                    <UploadZone onFileLoaded={handleFileLoaded} isLoading={isLoading} />
+                    <UploadZone
+                      onFileLoaded={handleFileLoaded}
+                      isLoading={isLoading}
+                      aiAvailable={canUseAi}
+                    />
                   </div>
                 </div>
 

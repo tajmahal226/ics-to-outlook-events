@@ -39,7 +39,7 @@ export function parseICS(rawContent: string): CalendarEvent[] {
 
 export function generateCleanICS(events: CalendarEvent[]): string {
   const comp = new ICAL.Component(['vcalendar', [], []]);
-  comp.updatePropertyWithValue('prodid', '-//Blink//ICS to Outlook//EN');
+  comp.updatePropertyWithValue('prodid', '-//Smart Schedule//ICS to Outlook//EN');
   comp.updatePropertyWithValue('version', '2.0');
   comp.updatePropertyWithValue('calscale', 'GREGORIAN');
   comp.updatePropertyWithValue('method', 'PUBLISH');
