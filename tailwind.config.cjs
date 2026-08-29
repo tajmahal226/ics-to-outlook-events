@@ -7,6 +7,13 @@ module.exports = {
   ],
   theme: {
   	extend: {
+  		// `xs:` is used in App.tsx, EventList.tsx and SettingsDialog.tsx but was
+  		// never defined, so every one of those classes was silently inert:
+  		// nav button labels stayed hidden at all widths and the paired form
+  		// fields never went two-column.
+  		screens: {
+  			xs: '480px'
+  		},
   		colors: {
   			border: 'hsl(var(--border))',
   			input: 'hsl(var(--input))',

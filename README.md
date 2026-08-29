@@ -15,7 +15,28 @@ A React + Vite web application that converts any document (PDF, email, text) int
 - [React](https://react.dev/) + [TypeScript](https://www.typescriptlang.org/)
 - [Vite](https://vitejs.dev/) (bundler / dev server)
 - [Tailwind CSS](https://tailwindcss.com/) + [shadcn/ui](https://ui.shadcn.com/)
-- [Blink SDK](https://blink.new) – AI text extraction, object generation, and file storage
+- [Anthropic SDK](https://github.com/anthropics/anthropic-sdk-typescript) – event extraction, called directly from the browser with your own key
+- [pdfjs-dist](https://mozilla.github.io/pdf.js/), [mammoth](https://github.com/mwilliamson/mammoth.js), [postal-mime](https://github.com/postalsys/postal-mime) – document parsing, in the browser
+- [ical.js](https://github.com/kewisch/ical.js) – reading and writing `.ics`
+
+---
+
+## Bring your own API key
+
+There is no backend and no server-side key. You supply your own API key in
+**Settings**, and it is stored in that browser's `localStorage` and sent only to the
+provider you chose. Documents are parsed on your device; only the extracted text is
+sent on.
+
+`.ics` files are read entirely locally by `ical.js` and need no key at all, so the
+app is useful before you configure anything.
+
+> **Security note:** a key in browser storage is readable by any script on the page.
+> Use a key with a spend limit, and revoke it if you ever suspect a problem. This is
+> the deliberate trade for having no backend to run.
+
+Anthropic is wired up today. OpenAI, OpenRouter, x.ai and Google Gemini are planned;
+the provider seam and settings UI already account for them.
 
 ---
 
@@ -23,9 +44,9 @@ A React + Vite web application that converts any document (PDF, email, text) int
 
 | Tool | Version |
 |------|---------|
-| Node.js | 18 or later |
+| Node.js | `^20.19.0 \|\| >=22.12.0` (see `engines` in `package.json`) |
 | npm / bun | any recent version |
-| [Blink](https://blink.new) account | free tier available |
+| An API key | from [Anthropic](https://console.anthropic.com/settings/keys), entered in Settings at runtime |
 
 ---
 
@@ -39,21 +60,10 @@ npm install
 bun install
 ```
 
-### 2. Configure environment variables
+### 2. Configure
 
-Nothing to do for the default setup — `.env` is committed with this project's Blink
-publishable credentials, so the app runs as-is. These are *publishable* client-side keys
-that get embedded in the browser bundle by design (see the security note below).
-
-To point the app at a different Blink project, create a `.env.local` file, which is
-gitignored and overrides `.env`:
-
-```env
-VITE_BLINK_PROJECT_ID=your-blink-project-id
-VITE_BLINK_PUBLISHABLE_KEY=your-blink-publishable-key
-```
-
-You can find these values in your [Blink dashboard](https://blink.new/dashboard) under your project's settings.
+Nothing to configure at build time. There are no environment variables: start the
+app and add your API key in **Settings**.
 
 ### 3. Start the dev server
 
@@ -117,11 +127,8 @@ vercel link      # once, to associate the directory with a Vercel project
 vercel --prod
 ```
 
-Because `.env` is committed, the Blink project ID and publishable key are already picked
-up at build time and no dashboard configuration is required. To point a deployment at a
-different Blink project, set `VITE_BLINK_PROJECT_ID` and `VITE_BLINK_PUBLISHABLE_KEY`
-under **Settings → Environment Variables** — real environment variables take precedence
-over both `.env` and `.env.local`.
+No environment variables are needed. Each visitor supplies their own API key at
+runtime through Settings, so there is nothing to configure in the Vercel dashboard.
 
 ### Option 2 – Netlify
 
@@ -130,10 +137,7 @@ over both `.env` and `.env.local`.
 3. Set build settings:
    - **Build command:** `npm run build`
    - **Publish directory:** `dist`
-4. Add environment variables in **Site settings → Environment variables**:
-   - `VITE_BLINK_PROJECT_ID`
-   - `VITE_BLINK_PUBLISHABLE_KEY`
-5. Click **Deploy**.
+4. Click **Deploy**. No environment variables are required.
 
 ### Option 3 – GitHub Pages
 
@@ -170,7 +174,7 @@ over both `.env` and `.env.local`.
    npm run deploy
    ```
 
-   > **Note:** GitHub Pages does not support server-side environment variables. Store your Blink keys directly in the `vite.config.ts` `define` block or use a CI/CD secret that replaces them at build time.
+   > **Note:** no secrets are needed at build time — each visitor enters their own API key in Settings.
 
 ### Option 4 – Self-hosted / Docker
 
@@ -202,20 +206,11 @@ scp -r dist/ user@your-server:/var/www/ics-app/
 
 ## Environment Variables
 
-| Variable | Required | Description |
-|----------|----------|-------------|
-| `VITE_BLINK_PROJECT_ID` | Yes | Your Blink project ID (found in the Blink dashboard) |
-| `VITE_BLINK_PUBLISHABLE_KEY` | Yes | Your Blink publishable API key |
+None. The app reads no build-time configuration.
 
-Resolution order, lowest priority first:
-
-1. Hardcoded fallbacks in `src/lib/blink.ts` (also infers the project ID from a
-   `*.sites.blink.new` hostname)
-2. `.env` — committed, holds this project's publishable credentials
-3. `.env.local` — gitignored, for local overrides
-4. Real environment variables (e.g. Vercel project settings), which win over everything
-
-> **Security note:** These are *publishable* (client-side) keys intended to be embedded in the browser bundle. Never commit or expose your Blink *secret* keys.
+Credentials are supplied per-browser at runtime in **Settings** and kept in
+`localStorage` under `smart-schedule.provider-settings`. Nothing is baked into the
+bundle, so the same deployment serves everyone with their own key.
 
 ---
 
@@ -226,4 +221,4 @@ Resolution order, lowest priority first:
 | `npm run dev` | Start the development server at `http://localhost:3000` |
 | `npm run build` | Build for production into `dist/` |
 | `npm run preview` | Preview the production build locally |
-| `npm run lint` | Run all linters (TypeScript, ESLint, CSS) |
+| `npm run lint` | Type-check plus CSS lint and the custom CSS guards (there is no ESLint) |
