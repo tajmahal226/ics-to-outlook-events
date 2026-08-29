@@ -98,23 +98,69 @@ path** — a malformed response must surface as a clear error, never as silently
 dropped events. `validateEventFields` already drops bad events downstream; the
 adapter's job is to fail loudly when the response isn't the right *shape*.
 
-### Document text extraction moves into the browser
+### Input handling: two paths, not one
 
 Replacing `extractFromBlob` with client-side parsing. This is a privacy
-improvement, not just a removal: files stop leaving the device entirely, which
-is what the existing comment in `handleFileLoaded` was already reaching for.
+improvement, not just a removal: files stop leaving the device for parsing,
+which is what the existing comment in `handleFileLoaded` was already reaching
+for.
 
-| Format | Library |
-|---|---|
-| `.pdf` | `pdfjs-dist` |
-| `.docx` | `mammoth` |
-| `.eml` | `postal-mime` |
-| `.txt` | `File.text()` — no library |
-| `.ics` | `ical.js`, already local |
-| `.msg` | **spike required — see risks** |
+Adding image formats splits the pipeline in two. A `.png` of an agenda cannot
+be parsed to text in the browser — it goes to the model **as an image**, over
+the vision path. Every provider's cheap tier supports vision (verified below),
+so this costs nothing in model choice, but it is a genuinely different branch.
 
-New module `src/lib/extractText.ts` owns the format → text mapping, so
-`App.tsx` calls one function regardless of type.
+| Format | Path | How |
+|---|---|---|
+| `.txt`, `.md` | text | `File.text()` — no library |
+| `.pdf` | text, **falling back to vision** | `pdfjs-dist` |
+| `.docx` | text | `mammoth` |
+| `.ics` | local parse, no model at all | `ical.js`, already present |
+| `.eml` | text | `postal-mime` |
+| `.jpg`, `.jpeg`, `.png` | vision | passed through as base64 |
+| `.tiff` | vision, **after conversion** | `utif` → canvas → PNG (see risks) |
+
+**Scanned PDFs are why the fallback exists.** `pdfjs-dist` returns little or no
+text for a PDF that is a scan, and conference agendas are often scans. Rather
+than silently extracting nothing, when a PDF yields implausibly little text the
+pipeline renders its pages to canvas and sends them down the vision path.
+`pdfjs-dist` already rasterises pages, so this reuses machinery that has to be
+there anyway. Without it, "PDF is supported" would be false for a large share
+of real agendas.
+
+Two modules rather than one:
+
+- `src/lib/extractText.ts` — file → text, for the text formats.
+- `src/lib/extractImages.ts` — file → `{mediaType, base64}[]`, for the image
+  formats and for rasterised PDF pages.
+
+`App.tsx` asks for one or the other based on the file, and the provider
+interface gains an image-bearing call.
+
+**Consequences for the existing pipeline, which must be handled explicitly:**
+
+- **Year inference has no source text on the vision path.**
+  `buildDefaultYearPlan` reads `sourceText` first; for an image that is empty,
+  so resolution falls to filename, then the date-based fallback, and the plan
+  is marked ambiguous. Every event then carries a review warning. That is the
+  correct behaviour and it should be deliberate, not incidental.
+- **Chunking does not apply to images.** `splitTextIntoExtractionChunks` is a
+  text operation. Multi-page documents chunk by *page* on the vision path, with
+  the same per-chunk prompt carrying its index.
+- **The source-text view will be empty** for image inputs. The "Source text"
+  tab should say so rather than render a blank pane.
+
+### Interface, revised for images
+
+```ts
+export interface AiProvider {
+  extractEvents(prompt: string, schema: object, images?: ImagePart[]): Promise<unknown>;
+  polishText(prompt: string): Promise<string>;
+  testConnection(): Promise<void>;
+}
+
+type ImagePart = { mediaType: 'image/png' | 'image/jpeg'; base64: string };
+```
 
 ### Settings
 
@@ -122,6 +168,29 @@ A dialog opened from the nav, beside "How it works" — the app has no router an
 this matches the pattern already present. Fields: provider, model, API key,
 and a **Test connection** button that makes one cheap call so a bad key is
 found before it costs an upload.
+
+**Defaults are the cheap tier, not the flagship.** Verified pricing per million
+tokens, all vision-capable:
+
+| Provider | Default model | In / Out |
+|---|---|---|
+| OpenAI | `gpt-5-nano` | $0.05 / $0.40 |
+| Google Gemini | `gemini-2.5-flash-lite` | $0.10 / $0.40 |
+| OpenRouter | `google/gemini-2.5-flash-lite` | $0.10 / $0.40 |
+| Anthropic | `claude-haiku-4-5` | $1.00 / $5.00 |
+| x.ai | `grok-4.3` | $1.25 / $2.50 |
+
+At these rates a ~60k-character agenda costs well under a cent on the OpenAI
+and Gemini defaults, against roughly $0.25–0.30 on a flagship. The dialog shows
+the selected model plainly so nobody is surprised by either the cost or the
+quality; upgrading is one dropdown away.
+
+**Model lists are fetched live, not hardcoded.** Every provider exposes a models
+endpoint (`/v1/models` on Anthropic, OpenAI, and x.ai; `/api/v1/models` on
+OpenRouter, which needs no key; `models.list` on Gemini). The dropdown populates
+from the user's own key after it is entered, with the table above as the
+pre-flight default. This keeps the app from going stale as model names change —
+the constants above are a starting point, not a maintained list.
 
 Config shape, persisted to `localStorage` under one key:
 
@@ -158,7 +227,8 @@ src/lib/providers/openaiCompatible.ts   OpenAI, OpenRouter, x.ai
 src/lib/providers/gemini.ts
 src/lib/providers/index.ts        factory: settings → AiProvider
 src/lib/settings.ts               localStorage load/save
-src/lib/extractText.ts            file → text, client-side
+src/lib/extractText.ts            file → text (txt, md, pdf, docx, eml)
+src/lib/extractImages.ts          file → base64 images (jpg, png, tiff, PDF pages)
 src/components/SettingsDialog.tsx
 ```
 
@@ -172,28 +242,50 @@ auto-engineer.js script tag in index.html   (takes the "Made with Blink" badge)
 VITE_BLINK_* from .env, README, CLAUDE.md
 ```
 
-**Modified:** `App.tsx` (three call sites plus the no-key gate), `index.html`
-(title is still "Blink App"), `README.md`, `CLAUDE.md`.
+**Modified:** `App.tsx` (three call sites, the no-key gate, and the text/vision
+branch), `UploadZone.tsx` (`ACCEPTED_EXTENSIONS` becomes `.pdf .txt .md .jpg
+.jpeg .png .tiff .docx .ics .eml`, and the displayed list grows past one row),
+`EventList.tsx` (the Source text tab must say so when the input was an image),
+`index.html` (title is still "Blink App"), `README.md`, `CLAUDE.md`.
+
+Because `UploadZone` now derives its `accept` attribute from that one array,
+the list only changes in a single place.
 
 ---
 
 ## Risks
 
-1. **`.msg` is the one format that may not survive.** Outlook `.msg` is a
-   compound binary format and Blink's server-side extractor probably handles it
-   better than anything runnable in a browser. Time-box a spike on
-   `@kenjiuno/msgreader` early. If it does not hold up, drop `.msg` from the
-   allowlist rather than ship a format that silently produces nothing — the
-   honest failure is refusing the file.
+1. **`.tiff` cannot be sent to any provider as-is, and browsers cannot decode
+   it.** No vision API accepts TIFF — Anthropic takes JPEG/PNG/GIF/WebP, OpenAI
+   the same set, Gemini PNG/JPEG/WebP/HEIC/HEIF — and Chrome and Firefox will
+   not render TIFF in an `<img>` either, so the usual canvas trick does not
+   work unaided. It requires a JavaScript decoder (`utif`) to produce pixel
+   data, then a canvas re-encode to PNG before upload. Multi-page TIFFs, which
+   are common for scans, become multiple images. This is buildable but it is
+   the riskiest item here; spike it early, and if it does not hold up, reject
+   `.tiff` with a message telling the user to save as PNG rather than accept a
+   file that silently yields nothing.
+
+   *Superseded:* `.msg` was the previous holder of this risk. It is dropped —
+   see the format table.
 2. **The API key sits in `localStorage`,** readable by any script on the page.
    Mitigated by: it is the user's own key, the app becomes a static bundle with
    one less third-party script (`auto-engineer.js` goes), and the settings
    dialog should recommend a dedicated key with a spend limit. This is a real
    trade, accepted deliberately, and it is why no-backend was chosen over a
    serverless proxy.
-3. **Cost moves to the user.** Roughly $0.25–0.30 per ~60k-character agenda at
-   Claude Opus 5 rates; materially less at lower effort or on a cheaper model.
+3. **Cost moves to the user**, though the cheap-tier defaults make it small —
+   well under a cent per agenda on `gpt-5-nano` or `gemini-2.5-flash-lite`,
+   against roughly $0.25–0.30 on a flagship. Images cost more than text for the
+   same document, since a rasterised page is worth more tokens than its text.
    The settings dialog should not hide which model is selected.
+
+6. **Cheap models may extract less well.** The defaults above are chosen on
+   price, and the product's whole value is the quality of the extraction. This
+   is worth measuring on a real agenda before settling: if a nano-tier model
+   misses sessions a flagship catches, the right default is the one that gets
+   the schedule right, not the one that costs least. Treat the table as a
+   starting point to be validated, not a conclusion.
 4. **`pdfjs-dist` ships a worker** and needs its worker URL wired for Vite.
    Routine, but it is the usual place a PDF integration breaks in a bundler.
 5. **Bundle size.** Four parser libraries plus three SDKs land in a bundle
@@ -224,12 +316,20 @@ confirmed from their own documentation.
 **Structured output:** confirmed per provider in the section above. The single
 substantive caveat is OpenRouter's routing-dependent strict mode.
 
+**Models and pricing**, read from OpenRouter's public catalogue on 2026-08-29.
+Every default in the settings table is vision-capable, which is what makes the
+image formats viable on the cheap tier. Native provider ids differ from
+OpenRouter's prefixed ids (`claude-haiku-4-5` natively vs
+`anthropic/claude-haiku-4.5` through OpenRouter); the adapters own that mapping,
+and the live model fetch makes a wrong default self-correcting.
+
 Still genuinely unknown, and only answerable by running it:
 
-- whether `@kenjiuno/msgreader` handles real `.msg` files well enough to keep
-  the format (risk 1)
-- real-world extraction quality per provider on an actual agenda, which is a
-  judgement call rather than a fact to look up
+- whether `utif` → canvas → PNG handles real multi-page TIFFs (risk 1)
+- whether the empty-text heuristic reliably distinguishes a scanned PDF from a
+  sparse one
+- real-world extraction quality per provider and per tier on an actual agenda,
+  which is a judgement call rather than a fact to look up (risk 6)
 
 ## Verification
 
@@ -242,15 +342,27 @@ Still genuinely unknown, and only answerable by running it:
   bad one.
 - One real agenda through at least one provider, end to end, checking that the
   amber/oxide warning tiers still populate.
+- **A photographed or screenshotted agenda** through the vision path, checking
+  that year inference correctly reports itself as ambiguous when there is no
+  source text to read a year from.
+- **A scanned PDF** (no text layer), confirming it rasterises and routes to
+  vision rather than returning zero events.
+- Each accepted extension actually accepted, and an unsupported one refused
+  with a message that names what to do instead.
 - Confirm no `blink` string remains outside `package-lock.json`.
 
 ## Sequencing
 
 1. Provider seam + Anthropic adapter + settings dialog + key storage.
-2. Client-side `extractText.ts` (spike `.msg` first — it may cut scope).
-3. OpenAI-shape adapter, then OpenRouter and x.ai as presets over it.
-4. Gemini adapter.
-5. Remove Blink; update README, CLAUDE.md, `index.html` title.
+2. `extractText.ts` for the text formats (`.txt`, `.md`, `.pdf`, `.docx`,
+   `.eml`). At this point Blink is out of the AI path entirely.
+3. `extractImages.ts` and the vision branch: images first, then the scanned-PDF
+   rasterise fallback. **Spike `.tiff` at the start of this step** — it may cut
+   scope, and finding that out before the rest is built is cheaper.
+4. OpenAI-shape adapter, then OpenRouter and x.ai as presets over it.
+5. Gemini adapter.
+6. Remove Blink; update README, CLAUDE.md, `index.html` title.
 
-Steps 1 and 2 are independently useful: after them the app runs on one provider
-with no Blink in the AI path.
+Steps 1 and 2 are independently useful and shippable: after them the app runs
+on one provider, with no Blink, over every text format. Step 3 is where the
+new capability lands.
