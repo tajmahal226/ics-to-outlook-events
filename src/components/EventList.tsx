@@ -156,7 +156,7 @@ export function EventList({ events, rawText, onExport, onDownloadIndividual, onU
               variant="ghost"
               size="sm"
               onClick={() => setExpandedEventId(isExpanded ? null : event.id)}
-              className="eyebrow h-8 rounded-sm px-2 hover:bg-secondary"
+              className="eyebrow h-8 rounded-sm px-2 hover:bg-secondary hover:text-foreground"
             >
               {isExpanded ? 'Close' : 'Edit'}
             </Button>
@@ -165,7 +165,7 @@ export function EventList({ events, rawText, onExport, onDownloadIndividual, onU
               size="sm"
               onClick={() => onDownloadIndividual(event)}
               disabled={isBlocked}
-              className="h-8 w-8 rounded-sm p-0 hover:bg-secondary"
+              className="h-8 w-8 rounded-sm p-0 hover:bg-secondary hover:text-foreground"
               title={isBlocked ? 'Fix the errors above to export this event' : 'Download this event as .ics'}
             >
               <Download className="h-3.5 w-3.5" />
@@ -236,7 +236,7 @@ export function EventList({ events, rawText, onExport, onDownloadIndividual, onU
                       size="sm"
                       onClick={() => onPolishDescription(event.id, event.description)}
                       disabled={isPolishing === event.id || !event.description}
-                      className="eyebrow h-7 gap-1.5 rounded-sm px-2 hover:bg-secondary"
+                      className="eyebrow h-7 gap-1.5 rounded-sm px-2 hover:bg-secondary hover:text-foreground"
                     >
                       {isPolishing === event.id ? (
                         <span className="block h-3 w-3 animate-spin rounded-full border-2 border-primary border-t-transparent" />
@@ -377,10 +377,15 @@ export function EventList({ events, rawText, onExport, onDownloadIndividual, onU
             </button>
           </div>
 
+          {/*
+            * The mono label is spelled out rather than using .eyebrow: that class
+            * sets a colour, and on an ink button it beats text-primary-foreground
+            * and renders ink on ink.
+            */}
           <Button
             onClick={onExport}
             disabled={isLoading || events.length === 0 || invalidEventCount > 0}
-            className="eyebrow eyebrow-ink h-10 gap-2 rounded-sm bg-primary px-5 text-primary-foreground hover:bg-primary/90 disabled:opacity-40"
+            className="h-10 gap-2 rounded-sm bg-primary px-5 font-mono text-[10px] font-semibold uppercase tracking-[0.16em] text-primary-foreground hover:bg-primary/90 disabled:opacity-40"
             title={invalidEventCount > 0 ? 'Fix the blocked events before exporting' : 'Download every event as one .ics'}
           >
             <Download className="h-4 w-4" />
