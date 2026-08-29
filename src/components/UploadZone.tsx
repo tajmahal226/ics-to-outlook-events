@@ -1,7 +1,8 @@
-import React, { useCallback } from 'react';
+import React, { useCallback, useState } from 'react';
 import { Upload } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { toast } from 'sonner';
+import { cn } from '@/lib/utils';
 
 interface UploadZoneProps {
   onFileLoaded: (file: File) => void;
@@ -10,15 +11,17 @@ interface UploadZoneProps {
 
 const ACCEPTED_EXTENSIONS = ['.ics', '.pdf', '.txt', '.eml', '.msg', '.docx'];
 
+const hasAcceptedExtension = (fileName: string) =>
+  ACCEPTED_EXTENSIONS.some((ext) => fileName.toLowerCase().endsWith(ext));
+
 export function UploadZone({ onFileLoaded, isLoading }: UploadZoneProps) {
-  const handleFileChange = useCallback(
-    (e: React.ChangeEvent<HTMLInputElement>) => {
-      const file = e.target.files?.[0];
+  const [isDraggingOver, setIsDraggingOver] = useState(false);
+
+  const acceptFile = useCallback(
+    (file: File | undefined | null) => {
       if (!file) return;
 
-      const hasAllowedExtension = ACCEPTED_EXTENSIONS.some(ext => file.name.toLowerCase().endsWith(ext));
-
-      if (!hasAllowedExtension) {
+      if (!hasAcceptedExtension(file.name)) {
         toast.error('That file type is not supported. Use a PDF, Word, email, text, or ICS file.');
         return;
       }
@@ -28,17 +31,68 @@ export function UploadZone({ onFileLoaded, isLoading }: UploadZoneProps) {
     [onFileLoaded]
   );
 
+  const handleFileChange = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      acceptFile(e.target.files?.[0]);
+    },
+    [acceptFile]
+  );
+
+  // dragover must be cancelled on every tick or the browser reverts to its
+  // default behaviour and opens the dropped file instead of handing it over.
+  const handleDragOver = useCallback((e: React.DragEvent) => {
+    if (isLoading) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'copy';
+    setIsDraggingOver(true);
+  }, [isLoading]);
+
+  const handleDragLeave = useCallback((e: React.DragEvent) => {
+    // Ignore the leave events fired while crossing this element's own children.
+    if (e.currentTarget.contains(e.relatedTarget as Node | null)) return;
+    setIsDraggingOver(false);
+  }, []);
+
+  const handleDrop = useCallback(
+    (e: React.DragEvent) => {
+      e.preventDefault();
+      setIsDraggingOver(false);
+      if (isLoading) return;
+      acceptFile(e.dataTransfer.files?.[0]);
+    },
+    [acceptFile, isLoading]
+  );
+
+  const headline = isLoading
+    ? 'Reading the document'
+    : isDraggingOver
+      ? 'Drop it here'
+      : 'Drop an agenda file, or choose one';
+
   return (
     <motion.div
       initial={{ opacity: 0, y: 8 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ delay: 0.2, duration: 0.4, ease: [0.2, 0.7, 0.3, 1] }}
     >
-      <label className="group block cursor-pointer border border-dashed border-border bg-card px-5 py-6 transition-colors duration-200 hover:border-primary/70 focus-within:border-primary md:px-7 md:py-7">
+      <label
+        onDragOver={handleDragOver}
+        onDragLeave={handleDragLeave}
+        onDrop={handleDrop}
+        className={cn(
+          'group block cursor-pointer border border-dashed bg-card px-5 py-6 transition-colors duration-200 focus-within:border-primary md:px-7 md:py-7',
+          isDraggingOver ? 'border-primary bg-secondary' : 'border-border hover:border-primary/70'
+        )}
+      >
         <span className="eyebrow mb-3 block">Start here</span>
 
         <span className="flex items-start gap-4">
-          <span className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center border border-border bg-background transition-colors duration-200 group-hover:border-primary">
+          <span
+            className={cn(
+              'mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center border bg-background transition-colors duration-200',
+              isDraggingOver ? 'border-primary' : 'border-border group-hover:border-primary'
+            )}
+          >
             {isLoading ? (
               <span className="block h-4 w-4 animate-spin rounded-full border-2 border-primary border-t-transparent" />
             ) : (
@@ -48,7 +102,7 @@ export function UploadZone({ onFileLoaded, isLoading }: UploadZoneProps) {
 
           <span className="min-w-0">
             <span className="block text-lg font-bold leading-tight tracking-tight md:text-2xl">
-              {isLoading ? 'Reading the document' : 'Choose an agenda file'}
+              {headline}
             </span>
             <span className="mt-1.5 block text-sm leading-relaxed text-muted-foreground">
               {isLoading
