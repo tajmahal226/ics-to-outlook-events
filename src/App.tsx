@@ -1,6 +1,6 @@
 import { useState, useCallback, useMemo } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
-import { Calendar, Trash2, Download, CheckCircle2, AlertCircle, Sparkles, HelpCircle } from 'lucide-react';
+import { motion, AnimatePresence, MotionConfig } from 'framer-motion';
+import { Trash2, Download, AlertCircle, Sparkles, HelpCircle } from 'lucide-react';
 import { toast, Toaster } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { UploadZone } from '@/components/UploadZone';
@@ -21,6 +21,11 @@ import { blink } from '@/lib/blink';
 const EXTRACTION_CHUNK_SIZE = 12000;
 const MAX_EXTRACTION_CHUNKS = 25;
 const MIN_NATURAL_BREAK_OFFSET = Math.floor(EXTRACTION_CHUNK_SIZE * 0.65);
+
+// The waiting rail shows unknown slots rather than invented times: a placeholder
+// reads as "nothing here yet", where a plausible-looking 11:00 would read as data.
+const EMPTY_TIME_LABEL = '··:··';
+const EMPTY_RAIL_SLOTS = ['slot-1', 'slot-2', 'slot-3'];
 
 type TextChunkPlan = {
   chunks: string[];
@@ -495,158 +500,181 @@ export default function App() {
   }, []);
 
   return (
-    <div className="min-h-screen bg-background text-foreground flex flex-col font-sans text-[15px] selection:bg-primary/10">
-      <Toaster position="top-right" expand={false} richColors />
+    <MotionConfig reducedMotion="user">
+      <div className="flex min-h-screen flex-col bg-background text-[15px] text-foreground selection:bg-primary/10">
+        <Toaster position="top-right" expand={false} richColors />
 
-      {/* Navigation */}
-      <nav className="h-16 md:h-20 border-b border-border/50 backdrop-blur-xl bg-background/80 sticky top-0 z-50 px-4 md:px-6 flex items-center justify-between overflow-hidden">
-        <div className="flex items-center gap-2 md:gap-3">
-          <div className="w-8 h-8 md:w-10 md:h-10 bg-primary rounded-lg md:rounded-xl flex items-center justify-center text-white shadow-lg shadow-primary/20 shrink-0">
-            <Calendar className="w-5 h-5 md:w-6 md:h-6" />
+        {/* Navigation. The mark is the rail itself: a spine with one node on it. */}
+        <nav className="sticky top-0 z-50 flex h-14 items-center justify-between border-b border-border bg-background/90 px-4 backdrop-blur-sm md:h-16 md:px-8">
+          <div className="flex items-center gap-3">
+            <div className="relative h-7 w-2 shrink-0" aria-hidden="true">
+              <div className="absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-primary/40" />
+              <div className="absolute left-1/2 top-2 h-[7px] w-[7px] -translate-x-1/2 bg-primary" />
+            </div>
+            <div className="flex min-w-0 items-baseline gap-2.5">
+              <h1 className="truncate text-base font-bold tracking-tight md:text-lg">Smart Schedule</h1>
+              <span className="eyebrow hidden sm:block">Agenda to Outlook</span>
+            </div>
           </div>
-          <div className="flex flex-col min-w-0">
-            <h1 className="text-lg md:text-xl font-bold tracking-tight leading-none truncate">Smart Schedule</h1>
-            <span className="text-[10px] text-muted-foreground font-medium uppercase tracking-widest mt-0.5 md:mt-1 opacity-60 hidden sm:block">AI Extraction Tool</span>
-          </div>
-        </div>
 
-        <div className="flex items-center gap-2 md:gap-4">
-          <Dialog>
-            <DialogTrigger asChild>
-              <Button variant="ghost" size="sm" className="text-muted-foreground hover:text-primary gap-1.5 md:gap-2 h-9 md:h-10 rounded-lg md:rounded-xl px-2 md:px-4">
-                <HelpCircle className="w-4 h-4" />
-                <span className="hidden xs:inline">FAQ</span>
-              </Button>
-            </DialogTrigger>
-            <DialogContent className="max-w-2xl w-[90vw] md:w-full rounded-2xl md:rounded-3xl p-6 md:p-8">
-              <DialogHeader>
-                <DialogTitle className="text-xl md:text-2xl font-black mb-2 md:mb-4">How it works</DialogTitle>
-                <DialogDescription className="space-y-4 md:space-y-6 pt-2">
-                  <div className="space-y-1.5 md:space-y-2">
-                    <h4 className="font-bold text-foreground flex items-center gap-2 text-sm md:text-base">
-                      <Sparkles className="w-4 h-4 text-primary" /> AI Power Extraction
-                    </h4>
-                    <p className="text-muted-foreground leading-relaxed text-xs md:text-sm">
-                      Our advanced AI scans your unstructured text (from PDFs, emails, or docs) to automatically detect event titles, dates, times, and descriptions.
-                    </p>
-                  </div>
-                  <div className="space-y-1.5 md:space-y-2">
-                    <h4 className="font-bold text-foreground flex items-center gap-2 text-sm md:text-base">
-                      <CheckCircle2 className="w-4 h-4 text-primary" /> Outlook Optimized
-                    </h4>
-                    <p className="text-muted-foreground leading-relaxed text-xs md:text-sm">
-                      The generated .ics files are standardized to follow Microsoft Outlook's specific requirements, ensuring your events land in the right time zone every time.
-                    </p>
-                  </div>
-                  <div className="space-y-1.5 md:space-y-2">
-                    <h4 className="font-bold text-foreground flex items-center gap-2 text-sm md:text-base">
-                      <Download className="w-4 h-4 text-primary" /> Supports All Files
-                    </h4>
-                    <p className="text-muted-foreground leading-relaxed text-xs md:text-sm">
-                      Whether it's a conference PDF, a copy-pasted email body, or a plain text list, just upload it and let us handle the formatting.
-                    </p>
-                  </div>
-                </DialogDescription>
-              </DialogHeader>
-            </DialogContent>
-          </Dialog>
-
-          <AnimatePresence>
-            {events.length > 0 && (
-              <motion.div
-                initial={{ opacity: 0, x: 20 }}
-                animate={{ opacity: 1, x: 0 }}
-                exit={{ opacity: 0, x: 20 }}
-              >
+          <div className="flex items-center gap-1 md:gap-2">
+            <Dialog>
+              <DialogTrigger asChild>
                 <Button
                   variant="ghost"
                   size="sm"
-                  onClick={handleReset}
-                  className="text-muted-foreground hover:text-destructive hover:bg-destructive/5 gap-1.5 md:gap-2 h-9 md:h-10 rounded-lg md:rounded-xl px-2 md:px-4 transition-all duration-300"
+                  className="h-9 gap-2 rounded-sm px-2 text-muted-foreground hover:text-primary md:px-3"
                 >
-                  <Trash2 className="w-4 h-4" />
-                  <span className="hidden xs:inline">Reset</span>
+                  <HelpCircle className="h-4 w-4" />
+                  <span className="hidden text-xs font-semibold xs:inline">How it works</span>
                 </Button>
-              </motion.div>
-            )}
-          </AnimatePresence>
-        </div>
-      </nav>
+              </DialogTrigger>
+              <DialogContent className="w-[92vw] max-w-xl rounded-sm border-border p-6 md:p-8">
+                <DialogHeader>
+                  <DialogTitle className="mb-2 text-xl font-bold tracking-tight md:text-2xl">How it works</DialogTitle>
+                  <DialogDescription className="space-y-5 pt-1 text-left">
+                    <span className="block space-y-1.5">
+                      <span className="eyebrow block">Reads to the end</span>
+                      <span className="block text-sm leading-relaxed text-muted-foreground">
+                        Long agendas are split into sections and extracted one at a time, so a session on page nine is
+                        found as reliably as one on page one. If any text is left over, the banner tells you how much.
+                      </span>
+                    </span>
+                    <span className="block space-y-1.5">
+                      <span className="eyebrow block">Marks what it guessed</span>
+                      <span className="block text-sm leading-relaxed text-muted-foreground">
+                        Dates missing a year get one inferred from the document, the filename, or the year you pick.
+                        Every event resting on that guess is flagged in amber. Flagged events still export; events with
+                        broken dates are held back in red until you fix them.
+                      </span>
+                    </span>
+                    <span className="block space-y-1.5">
+                      <span className="eyebrow block">Writes what Outlook expects</span>
+                      <span className="block text-sm leading-relaxed text-muted-foreground">
+                        The .ics follows Microsoft&rsquo;s requirements, attendees and all-day events included, so
+                        importing is a double-click. Export the whole day or any single event.
+                      </span>
+                    </span>
+                  </DialogDescription>
+                </DialogHeader>
+              </DialogContent>
+            </Dialog>
 
-      {/* Main Content */}
-      <main className="flex-1">
-        <section className="relative py-8 md:py-16 px-4 md:px-6">
-          <div className="absolute top-0 left-1/2 -translate-x-1/2 w-full max-w-7xl h-full pointer-events-none overflow-hidden opacity-10">
-            <div className="absolute -top-24 -left-24 w-64 md:w-96 h-64 md:h-96 bg-primary/30 rounded-full blur-[80px] md:blur-[100px]" />
-            <div className="absolute top-1/2 -right-24 w-64 md:w-96 h-64 md:h-96 bg-primary/20 rounded-full blur-[80px] md:blur-[100px]" />
+            <AnimatePresence>
+              {events.length > 0 && (
+                <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={handleReset}
+                    className="h-9 gap-2 rounded-sm px-2 text-muted-foreground hover:text-destructive md:px-3"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                    <span className="hidden text-xs font-semibold xs:inline">Start over</span>
+                  </Button>
+                </motion.div>
+              )}
+            </AnimatePresence>
           </div>
+        </nav>
 
-          <div className="max-w-4xl mx-auto text-center mb-8 md:mb-16">
-            <motion.h2
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              className="text-3xl sm:text-4xl md:text-5xl lg:text-6xl font-black mb-4 md:mb-6 leading-[1.1] tracking-tight"
-            >
-              Turn <span className="text-primary italic">any document</span> into a schedule
-            </motion.h2>
-            <motion.p
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.1 }}
-              className="text-base md:text-lg lg:text-xl text-muted-foreground max-w-2xl mx-auto leading-relaxed px-2"
-            >
-              Upload a conference PDF, an email, or a text list. Our AI extracts the events and generates an Outlook-ready file.
-            </motion.p>
-          </div>
-
-          <div className="max-w-5xl mx-auto w-full">
+        <main className="flex-1 px-4 py-10 md:px-8 md:py-16">
+          <div className="mx-auto w-full max-w-4xl">
+            {/*
+              * Everything in the empty state hangs off the rail, including the
+              * headline — the spine is the page's left margin, not a widget
+              * parked below the copy.
+              */}
             {events.length === 0 ? (
-              <div className="space-y-4">
-                <div className="glass-card rounded-2xl border border-border/50 p-4 text-left shadow-sm">
-                  <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-                    <div className="space-y-1">
-                      <p className="text-sm font-bold text-foreground">Year inference default</p>
-                      <p className="text-xs text-muted-foreground md:text-sm">
-                        {describeDefaultYearPlan(fallbackYearPreview)} Source text and filenames are checked first after upload.
-                      </p>
+              <div className="rail rail-draw">
+                <div className="rail-row">
+                  <div className="rail-time" />
+                  <motion.div
+                    initial={{ opacity: 0, y: 12 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ duration: 0.5, ease: [0.2, 0.7, 0.3, 1] }}
+                    className="rail-body pb-8 md:pb-12"
+                  >
+                    <p className="eyebrow mb-4">PDF &middot; Email &middot; Docx &middot; ICS</p>
+                    <h2 className="text-4xl font-extrabold leading-[1.04] tracking-[-0.035em] md:text-6xl">
+                      Read the agenda once.
+                    </h2>
+                    <p className="mt-5 max-w-2xl text-base leading-relaxed text-muted-foreground md:text-lg">
+                      Drop in a conference schedule and every session lands on the rail below. Anything the extraction
+                      wasn&rsquo;t certain about is marked, so you can fix it before it reaches your calendar.
+                    </p>
+                  </motion.div>
+                </div>
+
+                <div className="rail-row">
+                  <div className="rail-time" />
+                  <div className="rail-body">
+                    <div className="border border-border bg-card px-4 py-4 md:px-5">
+                      <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
+                        <div className="min-w-0 space-y-1.5">
+                          <p className="eyebrow">Default year</p>
+                          <p className="max-w-xl text-xs leading-relaxed text-muted-foreground md:text-sm">
+                            {describeDefaultYearPlan(fallbackYearPreview)} The document text and filename are checked first.
+                          </p>
+                        </div>
+                        <label className="flex shrink-0 flex-col gap-1.5">
+                          <span className="eyebrow">Year</span>
+                          <select
+                            value={explicitDefaultYear ?? ''}
+                            onChange={(event) => setExplicitDefaultYear(event.target.value ? Number(event.target.value) : null)}
+                            className="field field-mono h-10 w-full md:w-40"
+                          >
+                            <option value="">Auto ({fallbackYearPreview.year})</option>
+                            {selectableYears.map((year) => (
+                              <option key={year} value={year}>{year}</option>
+                            ))}
+                          </select>
+                        </label>
+                      </div>
                     </div>
-                    <label className="flex shrink-0 flex-col gap-1 text-xs font-bold uppercase tracking-wider text-muted-foreground">
-                      Default year
-                      <select
-                        value={explicitDefaultYear ?? ''}
-                        onChange={(event) => setExplicitDefaultYear(event.target.value ? Number(event.target.value) : null)}
-                        className="h-10 rounded-xl border border-border/60 bg-background px-3 text-sm font-semibold normal-case tracking-normal text-foreground shadow-sm focus:outline-none focus:ring-2 focus:ring-primary/20"
-                      >
-                        <option value="">Auto ({fallbackYearPreview.year})</option>
-                        {selectableYears.map((year) => (
-                          <option key={year} value={year}>{year}</option>
-                        ))}
-                      </select>
-                    </label>
                   </div>
                 </div>
-                <UploadZone onFileLoaded={handleFileLoaded} isLoading={isLoading} />
+
+                <div className="rail-row">
+                  <div className="rail-time">{EMPTY_TIME_LABEL}</div>
+                  <div className="rail-node rail-node-empty" aria-hidden="true" />
+                  <div className="rail-body">
+                    <UploadZone onFileLoaded={handleFileLoaded} isLoading={isLoading} />
+                  </div>
+                </div>
+
+                {/* The rail trails off rather than stopping: pending time, not empty rows. */}
+                {EMPTY_RAIL_SLOTS.map((slot, slotIndex) => (
+                  <div
+                    className="rail-row"
+                    key={slot}
+                    aria-hidden="true"
+                    style={{ opacity: 1 - (slotIndex + 1) * 0.28 }}
+                  >
+                    <div className="rail-time">{EMPTY_TIME_LABEL}</div>
+                    <div className="rail-node rail-node-empty" />
+                    <div className="rail-body">
+                      <div className="rail-slot" style={{ width: `${100 - slotIndex * 26}%` }} />
+                    </div>
+                  </div>
+                ))}
               </div>
             ) : (
               <div className="space-y-4">
                 {yearInferenceStatus && (
-                  <div className="flex items-start gap-3 rounded-2xl border border-primary/20 bg-primary/5 p-4 text-left text-sm text-foreground shadow-sm">
-                    <Calendar className="mt-0.5 h-5 w-5 shrink-0 text-primary" />
-                    <div>
-                      <p className="font-semibold">Year inference used for this extraction</p>
-                      <p className="text-muted-foreground">{yearInferenceStatus}</p>
-                    </div>
+                  <div className="border-l-2 border-primary bg-card px-4 py-3">
+                    <p className="eyebrow mb-1">Year inference</p>
+                    <p className="text-xs leading-relaxed text-muted-foreground md:text-sm">{yearInferenceStatus}</p>
                   </div>
                 )}
+
                 {extractionStatus && (
-                  <div className="flex items-start gap-3 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-left text-sm text-amber-900 shadow-sm">
-                    <AlertCircle className="mt-0.5 h-5 w-5 shrink-0" />
-                    <div>
-                      <p className="font-semibold">Partial extraction notice</p>
-                      <p>{extractionStatus}</p>
-                    </div>
+                  <div className="border-l-2 border-accent bg-card px-4 py-3">
+                    <p className="eyebrow mark-amber mb-1">Partial extraction</p>
+                    <p className="text-xs leading-relaxed text-muted-foreground md:text-sm">{extractionStatus}</p>
                   </div>
                 )}
+
                 <EventList
                   events={events}
                   onExport={handleExport}
@@ -660,13 +688,12 @@ export default function App() {
               </div>
             )}
           </div>
-        </section>
-      </main>
+        </main>
 
-      {/* Footer */}
-      <footer className="py-8 px-6 border-t border-border/50 text-center text-sm text-muted-foreground">
-        <p>© {new Date().getFullYear()} Smart Schedule. Built for faster productivity.</p>
-      </footer>
-    </div>
+        <footer className="border-t border-border px-4 py-6 md:px-8">
+          <p className="eyebrow">Smart Schedule &middot; {new Date().getFullYear()}</p>
+        </footer>
+      </div>
+    </MotionConfig>
   );
 }

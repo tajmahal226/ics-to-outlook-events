@@ -1,5 +1,5 @@
 import React, { useCallback } from 'react';
-import { Upload, Calendar, FileText, CheckCircle2, FileJson, Mail } from 'lucide-react';
+import { Upload } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { toast } from 'sonner';
 
@@ -8,17 +8,18 @@ interface UploadZoneProps {
   isLoading: boolean;
 }
 
+const ACCEPTED_EXTENSIONS = ['.ics', '.pdf', '.txt', '.eml', '.msg', '.docx'];
+
 export function UploadZone({ onFileLoaded, isLoading }: UploadZoneProps) {
   const handleFileChange = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
       const file = e.target.files?.[0];
       if (!file) return;
 
-      const allowedExtensions = ['.ics', '.pdf', '.txt', '.eml', '.msg', '.docx'];
-      const hasAllowedExtension = allowedExtensions.some(ext => file.name.toLowerCase().endsWith(ext));
+      const hasAllowedExtension = ACCEPTED_EXTENSIONS.some(ext => file.name.toLowerCase().endsWith(ext));
 
       if (!hasAllowedExtension) {
-        toast.error('File type not supported. Please upload an ICS, PDF, or Text file.');
+        toast.error('That file type is not supported. Use a PDF, Word, email, text, or ICS file.');
         return;
       }
 
@@ -29,43 +30,44 @@ export function UploadZone({ onFileLoaded, isLoading }: UploadZoneProps) {
 
   return (
     <motion.div
-      initial={{ opacity: 0, y: 20 }}
+      initial={{ opacity: 0, y: 8 }}
       animate={{ opacity: 1, y: 0 }}
-      className="max-w-xl mx-auto w-full"
+      transition={{ delay: 0.2, duration: 0.4, ease: [0.2, 0.7, 0.3, 1] }}
     >
-      <label className="relative group cursor-pointer block touch-none">
-        <div className="absolute inset-0 bg-primary/5 rounded-2xl md:rounded-3xl -rotate-1 group-hover:rotate-0 transition-transform duration-300" />
-        <div className="relative glass-card p-6 md:p-12 text-center rounded-2xl md:rounded-3xl border-2 border-dashed border-primary/20 group-hover:border-primary/50 transition-colors duration-300">
-          <div className="w-12 h-12 md:w-16 md:h-16 bg-primary/10 rounded-xl md:rounded-2xl flex items-center justify-center mx-auto mb-4 md:mb-6 group-hover:scale-110 transition-transform duration-300">
+      <label className="group block cursor-pointer border border-dashed border-border bg-card px-5 py-6 transition-colors duration-200 hover:border-primary/70 focus-within:border-primary md:px-7 md:py-7">
+        <span className="eyebrow mb-3 block">Start here</span>
+
+        <span className="flex items-start gap-4">
+          <span className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center border border-border bg-background transition-colors duration-200 group-hover:border-primary">
             {isLoading ? (
-              <div className="w-6 h-6 md:w-8 md:h-8 border-3 md:border-4 border-primary border-t-transparent rounded-full animate-spin" />
+              <span className="block h-4 w-4 animate-spin rounded-full border-2 border-primary border-t-transparent" />
             ) : (
-              <Upload className="w-6 h-6 md:w-8 md:h-8 text-primary" />
+              <Upload className="h-4 w-4" />
             )}
-          </div>
-          <h2 className="text-xl md:text-2xl font-bold mb-1 md:mb-2">Upload Schedule</h2>
-          <p className="text-sm md:text-base text-muted-foreground mb-6 md:mb-8 max-w-xs mx-auto">
-            PDFs, Emails, Text files, or ICS. We'll extract events automatically.
-          </p>
-          <div className="grid grid-cols-2 gap-3 md:gap-4 text-[10px] md:text-xs text-muted-foreground">
-            <div className="flex items-center gap-1.5 md:gap-2 justify-center bg-muted/30 py-2 rounded-lg">
-              <FileText className="w-3.5 h-3.5 md:w-4 md:h-4 text-primary/60" />
-              <span>PDF / Docs</span>
-            </div>
-            <div className="flex items-center gap-1.5 md:gap-2 justify-center bg-muted/30 py-2 rounded-lg">
-              <Mail className="w-3.5 h-3.5 md:w-4 md:h-4 text-primary/60" />
-              <span>Email files</span>
-            </div>
-            <div className="flex items-center gap-1.5 md:gap-2 justify-center bg-muted/30 py-2 rounded-lg col-span-2">
-              <FileJson className="w-3.5 h-3.5 md:w-4 md:h-4 text-primary/60" />
-              <span>Standard ICS Calendar</span>
-            </div>
-          </div>
-        </div>
+          </span>
+
+          <span className="min-w-0">
+            <span className="block text-lg font-bold leading-tight tracking-tight md:text-2xl">
+              {isLoading ? 'Reading the document' : 'Choose an agenda file'}
+            </span>
+            <span className="mt-1.5 block text-sm leading-relaxed text-muted-foreground">
+              {isLoading
+                ? 'Extracting text, then reading it section by section.'
+                : 'An .ics is parsed on this device. Everything else is read by AI.'}
+            </span>
+          </span>
+        </span>
+
+        <span className="mt-5 flex flex-wrap gap-x-4 gap-y-1.5 border-t border-border pt-3.5">
+          {ACCEPTED_EXTENSIONS.map((ext) => (
+            <span key={ext} className="eyebrow">{ext}</span>
+          ))}
+        </span>
+
         <input
           type="file"
-          accept=".ics,.pdf,.txt,.eml,.msg,.docx"
-          className="hidden"
+          accept={ACCEPTED_EXTENSIONS.join(',')}
+          className="sr-only"
           onChange={handleFileChange}
           disabled={isLoading}
         />

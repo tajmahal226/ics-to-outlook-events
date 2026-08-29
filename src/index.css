@@ -1,4 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,100..1000;1,9..40,100..1000&family=Lora:ital,wght@0,400..700;1,400..700&family=IBM+Plex+Mono:ital,wght@0,100..700;1,100..700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Archivo:ital,wght@0,400..800;1,400..800&family=IBM+Plex+Mono:wght@400;500;600&family=Source+Serif+4:ital,opsz,wght@0,8..60,300..600;1,8..60,300..600&display=swap');
 
 @tailwind base;
 @tailwind components;
@@ -6,130 +6,100 @@
 
 @layer base {
   :root {
-    /* ⚠️ AGENT MUST REPLACE: These are placeholder colors. You MUST define a custom palette before writing components. */
-
-    /* The template uses distinctive placeholder colors to force customization - do NOT use these in production! */
-    
-    /* 
-     * EXAMPLE PALETTES (use as inspiration, replace with your own):
-     * 
-     * Modern SaaS (Business/Enterprise):
-     * --primary: 217 91% 60%;        (Blue #2563EB)
-     * --accent: 217 91% 65%;         (Lighter blue #3B82F6)
-     * 
-     * Bold Tech (Startups/Developer Tools):
-     * --primary: 262 83% 58%;        (Purple #8B5CF6)
-     * --accent: 262 83% 68%;         (Lighter purple #A855F7)
-     * 
-     * Quantum Rose (Creative/Design):
-     * --primary: 330 81% 50%;        (Pink #E6067A)
-     * --accent: 330 81% 70%;         (Lighter pink #F472B6)
-     * 
-     * Ocean Depth (Calm/Professional):
-     * --primary: 200 98% 39%;        (Deep teal #0D9488)
-     * --accent: 200 98% 50%;         (Teal #14B8A6)
-     * 
-     * Sunset Warmth (Friendly/Welcoming):
-     * --primary: 24 95% 53%;         (Orange #F97316)
-     * --accent: 24 95% 63%;          (Lighter orange #FB923C)
+    /*
+     * THE TIME RAIL
+     * A schedule tool for reviewing a machine's reading of a conference agenda.
+     * Ground is cool slate paper, the spine is ink, and exactly two colours
+     * carry signal — never decoration:
+     *   amber = advisory  (stored validationWarnings; never blocks export)
+     *   oxide = blocking  (recomputed; kills export until fixed)
+     * Everything else is ink, paper, or rule.
      */
-    
-    /* Colors - Vibrant Emerald Green */
-    --background: 142 20% 98%;
-    --foreground: 142 50% 10%;
-    --card: 0 0% 100%;
-    --card-foreground: 142 50% 10%;
-    --popover: 0 0% 100%;
-    --popover-foreground: 142 50% 10%;
-    --primary: 142 71% 45%;
-    --primary-foreground: 0 0% 100%;
-    --secondary: 142 30% 95%;
-    --secondary-foreground: 142 60% 20%;
-    --muted: 142 20% 94%;
-    --muted-foreground: 142 30% 40%;
-    --accent: 142 71% 45%;
-    --accent-foreground: 0 0% 100%;
-    --destructive: 0 84% 60%;
-    --destructive-foreground: 0 0% 100%;
-    --border: 142 30% 90%;
-    --input: 142 30% 90%;
-    --ring: 142 71% 45%;
+    --ink: 218 22% 10%;
+    --ink-soft: 215 12% 40%;
+    --paper: 210 13% 94%;
+    --surface: 210 20% 98%;
+    --rule: 207 11% 81%;
+    --amber: 35 71% 42%;
+    --oxide: 6 60% 39%;
 
-    /* Charts */
-    --chart-1: 142 71% 45%;
-    --chart-2: 142 50% 55%;
-    --chart-3: 142 40% 65%;
-    --chart-4: 142 30% 75%;
-    --chart-5: 142 20% 85%;
+    /* The rail itself */
+    --rail-gutter: 5.25rem;
+    --rail-line: hsl(var(--ink) / 20%);
 
-    /* Sidebar */
-    --sidebar: 142 30% 95%;
-    --sidebar-foreground: 142 50% 10%;
-    --sidebar-primary: 142 71% 45%;
-    --sidebar-primary-foreground: 0 0% 100%;
-    --sidebar-accent: 142 30% 98%;
-    --sidebar-accent-foreground: 142 71% 45%;
-    --sidebar-border: 142 30% 90%;
-    --sidebar-ring: 142 71% 45%;
+    /* shadcn surface tokens, mapped onto the palette above */
+    --background: var(--paper);
+    --foreground: var(--ink);
+    --card: var(--surface);
+    --card-foreground: var(--ink);
+    --popover: var(--surface);
+    --popover-foreground: var(--ink);
+    --primary: var(--ink);
+    --primary-foreground: var(--surface);
+    --secondary: 210 13% 88%;
+    --secondary-foreground: var(--ink);
+    --muted: 210 13% 90%;
+    --muted-foreground: var(--ink-soft);
+    --accent: var(--amber);
+    --accent-foreground: var(--surface);
+    --destructive: var(--oxide);
+    --destructive-foreground: var(--surface);
+    --border: var(--rule);
+    --input: var(--rule);
+    --ring: var(--ink);
 
-    /* Fonts */
-    --font-sans: 'DM Sans', system-ui, sans-serif;
-    --font-serif: 'Lora', serif;
-    --font-mono: 'IBM Plex Mono', monospace;
+    /* Charts — ink stepped down, amber reserved */
+    --chart-1: 218 22% 10%;
+    --chart-2: 215 12% 40%;
+    --chart-3: 207 11% 60%;
+    --chart-4: 207 11% 74%;
+    --chart-5: 35 71% 42%;
 
-    /* Shadows */
-    --shadow-2xs: 0px 4px 8px -1px hsl(0deg 0% 0% / 5%);
-    --shadow-xs: 0px 4px 8px -1px hsl(0deg 0% 0% / 5%);
-    --shadow-sm: 0px 4px 8px -1px hsl(0deg 0% 0% / 10%), 0px 1px 2px -2px hsl(0deg 0% 0% / 10%);
-    --shadow: 0px 4px 8px -1px hsl(0deg 0% 0% / 10%), 0px 1px 2px -2px hsl(0deg 0% 0% / 10%);
-    --shadow-md: 0px 4px 8px -1px hsl(0deg 0% 0% / 10%), 0px 2px 4px -2px hsl(0deg 0% 0% / 10%);
-    --shadow-lg: 0px 4px 8px -1px hsl(0deg 0% 0% / 10%), 0px 4px 6px -2px hsl(0deg 0% 0% / 10%);
-    --shadow-xl: 0px 4px 8px -1px hsl(0deg 0% 0% / 10%), 0px 8px 10px -2px hsl(0deg 0% 0% / 10%);
-    --shadow-2xl: 0px 4px 8px -1px hsl(0deg 0% 0% / 25%);
+    /* Sidebar (unused by this app, kept coherent for vendored ui/) */
+    --sidebar: 210 13% 90%;
+    --sidebar-foreground: var(--ink);
+    --sidebar-primary: var(--ink);
+    --sidebar-primary-foreground: var(--surface);
+    --sidebar-accent: 210 13% 88%;
+    --sidebar-accent-foreground: var(--ink);
+    --sidebar-border: var(--rule);
+    --sidebar-ring: var(--ink);
 
-    /* Misc */
+    /*
+     * Archivo carries the voice; IBM Plex Mono holds the time column, where
+     * tabular figures are structural — if the digits do not align, the spine
+     * visibly bends. Source Serif 4 is for prose only.
+     */
+    --font-sans: 'Archivo', system-ui, sans-serif;
+    --font-serif: 'Source Serif 4', georgia, serif;
+    --font-mono: 'IBM Plex Mono', ui-monospace, monospace;
+
+    /* Paper sits flat: hairlines do the work shadows would */
+    --shadow-2xs: 0 1px 0 0 hsl(var(--ink) / 4%);
+    --shadow-xs: 0 1px 0 0 hsl(var(--ink) / 4%);
+    --shadow-sm: 0 1px 2px 0 hsl(var(--ink) / 6%);
+    --shadow: 0 1px 2px 0 hsl(var(--ink) / 6%);
+    --shadow-md: 0 2px 4px -1px hsl(var(--ink) / 8%);
+    --shadow-lg: 0 4px 12px -2px hsl(var(--ink) / 10%);
+    --shadow-xl: 0 8px 24px -4px hsl(var(--ink) / 12%);
+    --shadow-2xl: 0 16px 40px -8px hsl(var(--ink) / 16%);
     --tracking-normal: 0em;
     --spacing: 0.25rem;
-    --radius: 0.5rem;
+    --radius: 0.25rem;
   }
 
   .dark {
-    --background: 142 50% 5%;
-    --foreground: 142 20% 98%;
-    --card: 142 50% 7%;
-    --card-foreground: 142 20% 98%;
-    --popover: 142 50% 7%;
-    --popover-foreground: 142 20% 98%;
-    --primary: 142 71% 45%;
-    --primary-foreground: 0 0% 100%;
-    --secondary: 142 30% 15%;
-    --secondary-foreground: 142 20% 98%;
-    --muted: 142 30% 15%;
-    --muted-foreground: 142 20% 60%;
-    --accent: 142 71% 45%;
-    --accent-foreground: 0 0% 100%;
-    --destructive: 0 62.8% 30.6%;
-    --destructive-foreground: 142 20% 98%;
-    --border: 142 30% 20%;
-    --input: 142 30% 20%;
-    --ring: 142 71% 45%;
-
-    /* Charts */
-    --chart-1: 142 71% 45%;
-    --chart-2: 142 50% 55%;
-    --chart-3: 142 40% 65%;
-    --chart-4: 142 30% 75%;
-    --chart-5: 142 20% 85%;
-
-    /* Sidebar */
-    --sidebar: 142 30% 15%;
-    --sidebar-foreground: 142 20% 98%;
-    --sidebar-primary: 142 71% 45%;
-    --sidebar-primary-foreground: 0 0% 100%;
-    --sidebar-accent: 142 71% 45%;
-    --sidebar-accent-foreground: 0 0% 100%;
-    --sidebar-border: 142 30% 20%;
-    --sidebar-ring: 142 71% 45%;
+    /* Invert ground and ink; both signals lift to stay legible on the dark board. */
+    --ink: 210 16% 92%;
+    --ink-soft: 210 10% 62%;
+    --paper: 218 24% 8%;
+    --surface: 218 22% 11%;
+    --rule: 216 14% 24%;
+    --amber: 38 78% 58%;
+    --oxide: 6 62% 58%;
+    --rail-line: hsl(var(--ink) / 24%);
+    --secondary: 216 16% 18%;
+    --muted: 216 16% 18%;
   }
 
   * {
@@ -139,23 +109,217 @@
   body {
     @apply bg-background text-foreground;
 
-    font-family: var(--font-sans), Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    font-family: var(--font-sans);
     letter-spacing: var(--tracking-normal);
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* The rail depends on digits of equal width everywhere a time appears. */
+  input[type='datetime-local'],
+  .tabular {
+    font-variant-numeric: tabular-nums;
+  }
+
+  :focus-visible {
+    outline: 2px solid hsl(var(--ink));
+    outline-offset: 2px;
   }
 }
 
-.animate-fade-in {
-  animation: fade-in 0.3s ease-in-out;
+/* ---- The rail -------------------------------------------------------- */
+
+.rail {
+  position: relative;
 }
 
-@keyframes fade-in {
+.rail::before {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: var(--rail-gutter);
+  width: 1px;
+  background: var(--rail-line);
+  transform-origin: top center;
+  content: '';
+}
+
+.rail-draw::before {
+  animation: rail-draw 800ms cubic-bezier(0.2, 0.7, 0.3, 1) both;
+}
+
+.rail-row {
+  position: relative;
+  display: grid;
+  grid-template-columns: var(--rail-gutter) 1fr;
+  align-items: start;
+}
+
+.rail-time {
+  padding-top: 0.125rem;
+  padding-right: 1.125rem;
+  color: hsl(var(--ink-soft));
+  font-family: var(--font-mono);
+  font-size: 0.6875rem;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.06em;
+  text-align: right;
+}
+
+.rail-body {
+  padding-bottom: 1.5rem;
+  padding-left: 1.5rem;
+  min-width: 0;
+}
+
+/* A square node crossing the spine. Squares, not dots: this is an instrument. */
+.rail-node {
+  position: absolute;
+  top: 0.3125rem;
+  left: calc(var(--rail-gutter) - 3px);
+  width: 7px;
+  height: 7px;
+  background: hsl(var(--ink));
+}
+
+.rail-node-amber {
+  background: hsl(var(--amber));
+}
+
+.rail-node-oxide {
+  background: hsl(var(--oxide));
+}
+
+/* Hollow node = nothing here yet */
+.rail-node-empty {
+  background: hsl(var(--paper));
+  box-shadow: inset 0 0 0 1px hsl(var(--ink) / 30%);
+}
+
+.rail-tick {
+  position: absolute;
+  top: 0.5rem;
+  left: calc(var(--rail-gutter) - 6px);
+  width: 13px;
+  height: 1px;
+  background: hsl(var(--ink) / 45%);
+}
+
+.rail-slot {
+  height: 2.75rem;
+  border-top: 1px dashed hsl(var(--rule));
+}
+
+/* ---- Marks ----------------------------------------------------------- */
+
+.eyebrow {
+  color: hsl(var(--ink-soft));
+  font-family: var(--font-mono);
+  font-size: 0.625rem;
+  font-weight: 500;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+
+.mark {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  font-family: var(--font-mono);
+  font-size: 0.6875rem;
+  line-height: 1.5;
+  letter-spacing: 0.02em;
+}
+
+/*
+ * These two must stay AFTER .eyebrow: both are single-class selectors, so when
+ * an element carries `eyebrow mark-amber` the later rule wins the colour.
+ */
+.mark-amber {
+  color: hsl(var(--amber));
+}
+
+.mark-oxide {
+  color: hsl(var(--oxide));
+}
+
+/* Same reason: must follow .eyebrow to win the colour when both are applied. */
+.eyebrow-ink {
+  color: hsl(var(--ink));
+  font-weight: 600;
+}
+
+.prose-serif {
+  font-family: var(--font-serif);
+  font-size: 0.875rem;
+  line-height: 1.65;
+}
+
+.field {
+  width: 100%;
+  padding: 0.5rem 0.625rem;
+  border: 1px solid hsl(var(--rule));
+  border-radius: 2px;
+  background: hsl(var(--paper));
+  color: hsl(var(--ink));
+  font-family: var(--font-sans);
+  font-size: 0.875rem;
+}
+
+.field:focus {
+  outline: 2px solid hsl(var(--ink));
+  outline-offset: 1px;
+}
+
+.field-mono {
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.custom-scrollbar {
+  scrollbar-width: thin;
+  scrollbar-color: hsl(var(--ink) / 30%) transparent;
+}
+
+.custom-scrollbar::-webkit-scrollbar {
+  width: 8px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background: hsl(var(--ink) / 30%);
+}
+
+@keyframes rail-draw {
   from {
-    opacity: 0;
-    transform: translateY(10px);
+    transform: scaleY(0);
   }
 
   to {
-    opacity: 1;
-    transform: translateY(0);
+    transform: scaleY(1);
+  }
+}
+
+@media (width <= 640px) {
+  :root {
+    --rail-gutter: 3.5rem;
+  }
+
+  .rail-time {
+    padding-right: 0.625rem;
+    font-size: 0.625rem;
+  }
+
+  .rail-body {
+    padding-left: 0.875rem;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
   }
 }
